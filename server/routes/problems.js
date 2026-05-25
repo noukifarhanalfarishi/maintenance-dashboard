@@ -3,8 +3,10 @@ const router = express.Router();
 const db = require('../db');
 
 // ── Ticket number generator ────────────────────────────────────────────────
-function genTicket() {
-  const ds = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+function genTicket(dateStr) {
+  const ds = dateStr
+    ? dateStr.slice(0, 10).replace(/-/g, '')
+    : new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const last = db.prepare(
     "SELECT ticket_number FROM problems WHERE ticket_number LIKE ? ORDER BY ticket_number DESC LIMIT 1"
   ).get(`TKT-${ds}-%`);
@@ -22,13 +24,14 @@ const SORT_MAP = {
   total_downtime:   'total_downtime',
   priority: `CASE p.priority WHEN 'Critical' THEN 1 WHEN 'High' THEN 2 WHEN 'Medium' THEN 3 WHEN 'Low' THEN 4 ELSE 5 END`,
   status:   `CASE p.status  WHEN 'Open' THEN 1 WHEN 'In Progress' THEN 2 WHEN 'Pending Part' THEN 3 WHEN 'Closed' THEN 4 ELSE 5 END`,
+  is_repeat: 'p.is_repeat',
 };
 
 // ── GET /api/problems ──────────────────────────────────────────────────────
 router.get('/', (req, res) => {
   try {
     const {
-      status, priority, category, machine_id,
+      status, priority, category, machine_id, is_repeat,
       search, start_date, end_date,
       sort_by = 'reported_at', sort_order = 'desc',
       limit = 20, offset = 0,
@@ -40,6 +43,7 @@ router.get('/', (req, res) => {
     if (priority)   { conds.push('p.priority = ?');             params.push(priority); }
     if (category)   { conds.push('p.problem_category = ?');     params.push(category); }
     if (machine_id) { conds.push('p.machine_id = ?');           params.push(machine_id); }
+    if (is_repeat)  { conds.push('p.is_repeat = ?');            params.push(is_repeat); }
     if (start_date) { conds.push("date(p.reported_at) >= ?");   params.push(start_date); }
     if (end_date)   { conds.push("date(p.reported_at) <= ?");   params.push(end_date); }
     if (search) {
@@ -101,16 +105,16 @@ router.get('/:id', (req, res) => {
 // ── POST /api/problems — create ────────────────────────────────────────────
 router.post('/', (req, res) => {
   try {
-    const { machine_id, problem_category, priority, description, root_cause, reported_by, status } = req.body;
-    if (!problem_category || !priority || !description || !reported_by)
-      return res.status(400).json({ error: 'problem_category, priority, description, reported_by wajib diisi' });
+    const { machine_id, problem_category, priority, description, root_cause, reported_by, status, is_repeat, reported_at } = req.body;
+    if (!problem_category || !description || !reported_by)
+      return res.status(400).json({ error: 'problem_category, description, reported_by wajib diisi' });
 
-    const ticket_number = genTicket();
+    const ticket_number = genTicket(reported_at);
     const result = db.prepare(`
-      INSERT INTO problems (ticket_number, machine_id, problem_category, priority, description, root_cause, reported_by, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(ticket_number, machine_id || null, problem_category, priority, description,
-           root_cause || null, reported_by, status || 'Open');
+      INSERT INTO problems (ticket_number, machine_id, problem_category, priority, description, root_cause, reported_by, reported_at, status, is_repeat)
+      VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), ?, ?)
+    `).run(ticket_number, machine_id || null, problem_category, priority || 'Medium', description,
+           root_cause || null, reported_by, reported_at || null, status || 'Open', is_repeat || 'R');
 
     res.status(201).json({ id: result.lastInsertRowid, ticket_number, message: 'Problem created' });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -119,16 +123,18 @@ router.post('/', (req, res) => {
 // ── PUT /api/problems/:id — full update ───────────────────────────────────
 router.put('/:id', (req, res) => {
   try {
-    const { machine_id, problem_category, priority, description, root_cause, reported_by, status } = req.body;
+    const { machine_id, problem_category, priority, description, root_cause, reported_by, status, is_repeat, reported_at } = req.body;
     const closed_at = status === 'Closed' ? new Date().toISOString() : null;
     const result = db.prepare(`
       UPDATE problems
       SET machine_id=?, problem_category=?, priority=?, description=?,
-          root_cause=?, reported_by=?, status=?,
+          root_cause=?, reported_by=?, status=?, is_repeat=?,
+          reported_at = COALESCE(?, reported_at),
           closed_at = CASE WHEN ? IS NOT NULL THEN ? ELSE closed_at END
       WHERE id=?
-    `).run(machine_id, problem_category, priority, description,
-           root_cause, reported_by, status, closed_at, closed_at, req.params.id);
+    `).run(machine_id, problem_category, priority || 'Medium', description,
+           root_cause, reported_by, status, is_repeat || 'R',
+           reported_at || null, closed_at, closed_at, req.params.id);
 
     if (!result.changes) return res.status(404).json({ error: 'Problem not found' });
     res.json({ message: 'Problem updated' });
@@ -138,7 +144,7 @@ router.put('/:id', (req, res) => {
 // ── PATCH /api/problems/:id — partial update (status / root_cause) ─────────
 router.patch('/:id', (req, res) => {
   try {
-    const allowed = ['status', 'root_cause', 'priority', 'description'];
+    const allowed = ['status', 'root_cause', 'priority', 'description', 'is_repeat'];
     const sets = [], params = [];
 
     allowed.forEach(f => {

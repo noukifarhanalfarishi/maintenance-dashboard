@@ -103,7 +103,19 @@ function ensureTestUsers() {
   tx();
 }
 
+function migrateSchema() {
+  const machineCols = db.prepare('PRAGMA table_info(machines)').all().map(r => r.name)
+  if (!machineCols.includes('line')) {
+    db.exec("ALTER TABLE machines ADD COLUMN line TEXT")
+  }
+  const problemCols = db.prepare('PRAGMA table_info(problems)').all().map(r => r.name)
+  if (!problemCols.includes('is_repeat')) {
+    db.exec("ALTER TABLE problems ADD COLUMN is_repeat TEXT DEFAULT 'R'")
+  }
+}
+
 initSchema();
+migrateSchema();
 seedData();
 ensureTestUsers();
 

@@ -10,7 +10,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
 import { machinesApi } from '../api/client'
-import { StatusBadge, PriorityBadge, CategoryBadge } from '../components/Badge'
+import { StatusBadge, CategoryBadge } from '../components/Badge'
 
 // ── Constants ────────────────────────────────────────────────────────────
 const MACHINE_TYPES = [
@@ -57,9 +57,9 @@ function Toast({ msg, type, onDone }) {
 function MachineFormModal({ machine, onSave, onClose }) {
   const [form, setForm] = useState(machine ? {
     machine_code: machine.machine_code, machine_name: machine.machine_name,
-    machine_type: machine.machine_type||'', location: machine.location||'',
-    department: machine.department||'', status: machine.status,
-  } : { machine_code:'', machine_name:'', machine_type:'', location:'', department:'', status:'active' })
+    machine_type: machine.machine_type||'', line: machine.line||'',
+    location: machine.location||'', department: machine.department||'', status: machine.status,
+  } : { machine_code:'', machine_name:'', machine_type:'', line:'', location:'', department:'', status:'active' })
   const [errors, setErrors] = useState({})
   const [saving, setSaving] = useState(false)
   const set = (k, v) => { setForm(f=>({...f,[k]:v})); setErrors(e=>({...e,[k]:''})) }
@@ -117,16 +117,23 @@ function MachineFormModal({ machine, onSave, onClose }) {
               <datalist id="types-list">{MACHINE_TYPES.map(t=><option key={t} value={t}/>)}</datalist>
             </div>
             <div>
-              <label className="label">Departemen</label>
-              <input className="input" list="dept-list" value={form.department}
-                onChange={e=>set('department',e.target.value)} placeholder="Machining..." />
-              <datalist id="dept-list">{DEPARTMENTS.map(d=><option key={d} value={d}/>)}</datalist>
+              <label className="label">Line / Grup Mesin</label>
+              <input className="input" value={form.line}
+                onChange={e=>set('line',e.target.value)} placeholder="Atsuen, Sekisou..." />
             </div>
           </div>
-          <div>
-            <label className="label">Lokasi</label>
-            <input className="input" value={form.location} onChange={e=>set('location',e.target.value)}
-              placeholder="Line 1, Utility Room, Rooftop..." />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="label">Departemen</label>
+              <input className="input" list="dept-list" value={form.department}
+                onChange={e=>set('department',e.target.value)} placeholder="Belt Assy, Element Ring..." />
+              <datalist id="dept-list">{DEPARTMENTS.map(d=><option key={d} value={d}/>)}</datalist>
+            </div>
+            <div>
+              <label className="label">Lokasi</label>
+              <input className="input" value={form.location} onChange={e=>set('location',e.target.value)}
+                placeholder="Line 1, Utility Room..." />
+            </div>
           </div>
           <div className="flex gap-3 justify-end pt-2 border-t border-slate-100">
             <button type="button" className="btn-secondary" onClick={onClose}>Batal</button>
@@ -210,6 +217,9 @@ function MachineDetailDrawer({ id, onClose, onEdit }) {
               <div className="flex items-center gap-2 mt-2 flex-wrap">
                 {machine.machine_type && (
                   <span className="text-[11px] bg-white/10 text-white/70 px-2 py-0.5 rounded-full">{machine.machine_type}</span>
+                )}
+                {machine.line && (
+                  <span className="text-[11px] bg-white/10 text-white/70 px-2 py-0.5 rounded-full">Line: {machine.line}</span>
                 )}
                 {machine.location && (
                   <span className="flex items-center gap-1 text-[11px] text-white/60">
@@ -349,7 +359,7 @@ function MachineDetailDrawer({ id, onClose, onEdit }) {
                 <table className="w-full">
                   <thead className="bg-slate-50 border-b border-slate-100">
                     <tr>
-                      {['Tiket','Kategori','Priority','Status','Tanggal','Downtime','Teknisi'].map(h=>(
+                      {['Tiket','Kategori','Status','Tanggal','Downtime','Teknisi'].map(h=>(
                         <th key={h} className="table-th text-[10px]">{h}</th>
                       ))}
                     </tr>
@@ -363,7 +373,6 @@ function MachineDetailDrawer({ id, onClose, onEdit }) {
                           </span>
                         </td>
                         <td className="table-td"><CategoryBadge category={p.problem_category}/></td>
-                        <td className="table-td"><PriorityBadge priority={p.priority}/></td>
                         <td className="table-td"><StatusBadge status={p.status}/></td>
                         <td className="table-td text-[10px] text-slate-400">{fmtDate(p.reported_at)}</td>
                         <td className="table-td text-xs text-orange-600 font-medium">{fmtDur(p.downtime)}</td>
@@ -398,6 +407,7 @@ function MachineCard({ m, onClick, onEdit, onDelete }) {
 
       <div className="flex flex-wrap gap-1.5 mb-3">
         {m.machine_type && <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{m.machine_type}</span>}
+        {m.line && <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">{m.line}</span>}
         {m.location && (
           <span className="flex items-center gap-1 text-[10px] text-slate-500">
             <MapPin size={9}/>{m.location}
@@ -616,14 +626,14 @@ export default function Machines() {
             <table className="w-full">
               <thead className="bg-slate-50 border-b border-slate-100">
                 <tr>
-                  {['Kode','Nama Mesin','Tipe','Lokasi','Dept','Status','Problem','Aktif','Downtime','Aksi'].map(h=>(
+                  {['Kode','Nama Mesin','Tipe','Line','Lokasi','Dept','Status','Problem','Aktif','Downtime','Aksi'].map(h=>(
                     <th key={h} className="table-th">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {loading ? [...Array(6)].map((_,i)=>(
-                  <tr key={i}>{[...Array(10)].map((_,j)=>(
+                  <tr key={i}>{[...Array(11)].map((_,j)=>(
                     <td key={j} className="table-td"><div className="h-4 bg-slate-100 rounded animate-pulse"/></td>
                   ))}</tr>
                 )) : machines.map(m=>(
@@ -636,6 +646,7 @@ export default function Machines() {
                       </div>
                     </td>
                     <td className="table-td text-xs text-slate-500">{m.machine_type||'—'}</td>
+                    <td className="table-td text-xs text-slate-500">{m.line||'—'}</td>
                     <td className="table-td text-xs text-slate-500">{m.location||'—'}</td>
                     <td className="table-td text-xs text-slate-500">{m.department||'—'}</td>
                     <td className="table-td"><StatusBadge status={m.status}/></td>

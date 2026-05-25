@@ -6,15 +6,15 @@ import {
   ChevronDown as ChevDown, Save, RotateCcw,
 } from 'lucide-react'
 import { problemsApi, machinesApi, sparePartsApi } from '../api/client'
-import { StatusBadge, PriorityBadge, CategoryBadge, ActionBadge } from '../components/Badge'
+import { StatusBadge, CategoryBadge, ActionBadge } from '../components/Badge'
 
 // ══════════════════════════════════════════════════════════════════════════
 // CONSTANTS
 // ══════════════════════════════════════════════════════════════════════════
 const STATUSES   = ['Open', 'In Progress', 'Pending Part', 'Closed']
-const PRIORITIES = ['Critical', 'High', 'Medium', 'Low']
 const CATEGORIES = ['Mechanical', 'Electrical', 'Pneumatic', 'Hydraulic', 'Software', 'Other']
 const ACTION_TYPES = ['Corrective', 'Preventive', 'Predictive']
+const IS_REPEAT_OPTS = [{ v: 'R', label: 'Repeat' }, { v: 'N', label: 'Baru' }]
 const PAGE_SIZE  = 20
 
 const STATUS_CFG = {
@@ -163,7 +163,12 @@ function Toast({ msg, type, onDone }) {
 // NEW PROBLEM MODAL
 // ══════════════════════════════════════════════════════════════════════════
 function NewProblemModal({ machines, onSave, onClose }) {
-  const INIT = { machine_id: '', problem_category: 'Mechanical', priority: 'Medium', description: '', reported_by: '' }
+  const nowLocal = () => {
+    const d = new Date()
+    d.setSeconds(0, 0)
+    return d.toISOString().slice(0, 16) // YYYY-MM-DDTHH:MM
+  }
+  const INIT = { machine_id: '', problem_category: 'Mechanical', is_repeat: 'R', description: '', reported_by: '', reported_at: nowLocal() }
   const [form, setForm] = useState(INIT)
   const [errors, setErrors] = useState({})
   const [saving, setSaving] = useState(false)
@@ -172,9 +177,9 @@ function NewProblemModal({ machines, onSave, onClose }) {
   const validate = () => {
     const e = {}
     if (!form.problem_category) e.problem_category = 'Wajib diisi'
-    if (!form.priority)         e.priority = 'Wajib diisi'
     if (!form.description.trim()) e.description = 'Wajib diisi'
     if (!form.reported_by.trim()) e.reported_by = 'Wajib diisi'
+    if (!form.reported_at) e.reported_at = 'Wajib diisi'
     setErrors(e)
     return Object.keys(e).length === 0
   }
@@ -184,7 +189,9 @@ function NewProblemModal({ machines, onSave, onClose }) {
     if (!validate()) return
     setSaving(true)
     try {
-      await onSave({ ...form, machine_id: form.machine_id || null })
+      // Convert datetime-local value (YYYY-MM-DDTHH:MM) to DB-compatible string
+      const reported_at = form.reported_at ? form.reported_at.replace('T', ' ') + ':00' : null
+      await onSave({ ...form, machine_id: form.machine_id || null, reported_at })
     } finally { setSaving(false) }
   }
 
@@ -211,7 +218,6 @@ function NewProblemModal({ machines, onSave, onClose }) {
           </div>
 
           <div className="grid grid-cols-2 gap-4">
-            {/* Category */}
             <div>
               <label className="label">Kategori *</label>
               <select className={`input ${errors.problem_category ? 'border-red-400' : ''}`}
@@ -220,15 +226,24 @@ function NewProblemModal({ machines, onSave, onClose }) {
               </select>
               {errors.problem_category && <p className="text-red-500 text-xs mt-1">{errors.problem_category}</p>}
             </div>
-            {/* Priority */}
             <div>
-              <label className="label">Priority *</label>
-              <select className={`input ${errors.priority ? 'border-red-400' : ''}`}
-                value={form.priority} onChange={e => set('priority', e.target.value)}>
-                {PRIORITIES.map(p => <option key={p}>{p}</option>)}
+              <label className="label">Jenis</label>
+              <select className="input" value={form.is_repeat} onChange={e => set('is_repeat', e.target.value)}>
+                {IS_REPEAT_OPTS.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
               </select>
-              {errors.priority && <p className="text-red-500 text-xs mt-1">{errors.priority}</p>}
             </div>
+          </div>
+
+          {/* Date & Time */}
+          <div>
+            <label className="label">Tanggal &amp; Waktu Lapor *</label>
+            <input
+              type="datetime-local"
+              className={`input ${errors.reported_at ? 'border-red-400' : ''}`}
+              value={form.reported_at}
+              onChange={e => set('reported_at', e.target.value)}
+            />
+            {errors.reported_at && <p className="text-red-500 text-xs mt-1">{errors.reported_at}</p>}
           </div>
 
           {/* Description */}
@@ -520,7 +535,6 @@ function ProblemDrawer({ id, spareParts, onClose, onRefresh, showToast }) {
               <p className="text-[11px] font-mono text-white/50">{problem.ticket_number}</p>
               <p className="text-white font-bold text-sm mt-0.5 leading-snug line-clamp-2">{problem.description}</p>
               <div className="flex items-center gap-2 mt-2 flex-wrap">
-                <PriorityBadge priority={problem.priority} />
                 <CategoryBadge category={problem.problem_category} />
                 {problem.machine_code && (
                   <span className="text-[11px] text-white/60 bg-white/10 px-2 py-0.5 rounded-full">
@@ -700,14 +714,18 @@ function ProblemDrawer({ id, spareParts, onClose, onRefresh, showToast }) {
 // EDIT PROBLEM MODAL
 // ══════════════════════════════════════════════════════════════════════════
 function EditProblemModal({ problem, machines, onSave, onClose }) {
+  // Convert stored datetime to datetime-local format (YYYY-MM-DDTHH:MM)
+  const toLocalInput = (dt) => dt ? dt.slice(0, 16).replace(' ', 'T') : ''
+
   const [form, setForm] = useState({
     machine_id: problem.machine_id || '',
     problem_category: problem.problem_category,
-    priority: problem.priority,
+    is_repeat: problem.is_repeat || 'R',
     description: problem.description,
     root_cause: problem.root_cause || '',
     reported_by: problem.reported_by,
     status: problem.status,
+    reported_at: toLocalInput(problem.reported_at),
   })
   const [saving, setSaving] = useState(false)
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
@@ -715,7 +733,10 @@ function EditProblemModal({ problem, machines, onSave, onClose }) {
   const handleSubmit = async (e) => {
     e.preventDefault()
     setSaving(true)
-    try { await onSave(form) } finally { setSaving(false) }
+    try {
+      const reported_at = form.reported_at ? form.reported_at.replace('T', ' ') + ':00' : null
+      await onSave({ ...form, reported_at })
+    } finally { setSaving(false) }
   }
 
   return (
@@ -745,9 +766,9 @@ function EditProblemModal({ problem, machines, onSave, onClose }) {
               </select>
             </div>
             <div>
-              <label className="label">Priority</label>
-              <select className="input" value={form.priority} onChange={e => set('priority', e.target.value)}>
-                {PRIORITIES.map(p => <option key={p}>{p}</option>)}
+              <label className="label">Jenis</label>
+              <select className="input" value={form.is_repeat} onChange={e => set('is_repeat', e.target.value)}>
+                {IS_REPEAT_OPTS.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
               </select>
             </div>
             <div>
@@ -756,6 +777,11 @@ function EditProblemModal({ problem, machines, onSave, onClose }) {
                 {STATUSES.map(s => <option key={s}>{s}</option>)}
               </select>
             </div>
+          </div>
+          <div>
+            <label className="label">Tanggal &amp; Waktu Lapor</label>
+            <input type="datetime-local" className="input" value={form.reported_at}
+              onChange={e => set('reported_at', e.target.value)} />
           </div>
           <div>
             <label className="label">Deskripsi</label>
@@ -800,7 +826,7 @@ export default function Problems() {
   const [page, setPage]           = useState(0)
   const [sort, setSort]           = useState({ by: 'reported_at', order: 'desc' })
   const [showMoreFilters, setShowMoreFilters] = useState(false)
-  const [filters, setFilters]     = useState({ search: '', status: '', priority: '', category: '', machine_id: '', start_date: '', end_date: '' })
+  const [filters, setFilters]     = useState({ search: '', status: '', category: '', machine_id: '', is_repeat: '', start_date: '', end_date: '' })
 
   // ── Modal/drawer state
   const [showNew, setShowNew]     = useState(false)
@@ -816,9 +842,9 @@ export default function Problems() {
     setLoading(true)
     const params = {
       ...filters.status     && { status:     filters.status },
-      ...filters.priority   && { priority:   filters.priority },
       ...filters.category   && { category:   filters.category },
       ...filters.machine_id && { machine_id: filters.machine_id },
+      ...filters.is_repeat  && { is_repeat:  filters.is_repeat },
       ...filters.search     && { search:     filters.search },
       ...filters.start_date && { start_date: filters.start_date },
       ...filters.end_date   && { end_date:   filters.end_date },
@@ -918,9 +944,10 @@ export default function Problems() {
             <option value="">Semua Status</option>
             {STATUSES.map(s => <option key={s}>{s}</option>)}
           </select>
-          <select className="input w-32 text-sm" value={filters.priority} onChange={e => setF('priority', e.target.value)}>
-            <option value="">Semua Priority</option>
-            {PRIORITIES.map(p => <option key={p}>{p}</option>)}
+          <select className="input w-32 text-sm" value={filters.is_repeat} onChange={e => setF('is_repeat', e.target.value)}>
+            <option value="">Semua Jenis</option>
+            <option value="N">Baru</option>
+            <option value="R">Repeat</option>
           </select>
           <button
             onClick={() => setShowMoreFilters(m => !m)}
@@ -928,13 +955,13 @@ export default function Problems() {
           >
             <Filter size={13} />
             Filter Lanjut
-            {(filters.category || filters.machine_id || filters.start_date || filters.end_date) && (
+            {(filters.category || filters.machine_id || filters.is_repeat || filters.start_date || filters.end_date) && (
               <span className="w-1.5 h-1.5 bg-accent rounded-full ml-0.5" />
             )}
           </button>
           {hasFilters && (
             <button className="btn-secondary text-xs text-red-500 hover:text-red-700 gap-1"
-              onClick={() => { setFilters({ search: '', status: '', priority: '', category: '', machine_id: '', start_date: '', end_date: '' }); setPage(0) }}>
+              onClick={() => { setFilters({ search: '', status: '', category: '', machine_id: '', is_repeat: '', start_date: '', end_date: '' }); setPage(0) }}>
               <X size={12} /> Reset
             </button>
           )}
@@ -970,7 +997,7 @@ export default function Problems() {
                 <SortTH label="Ticket #"    field="ticket_number"    sort={sort} onSort={handleSort} />
                 <SortTH label="Mesin"       field="machine_code"     sort={sort} onSort={handleSort} />
                 <SortTH label="Kategori"    field="problem_category" sort={sort} onSort={handleSort} />
-                <SortTH label="Priority"    field="priority"         sort={sort} onSort={handleSort} />
+                <SortTH label="Jenis"       field="is_repeat"        sort={sort} onSort={handleSort} />
                 <SortTH label="Status"      field="status"           sort={sort} onSort={handleSort} />
                 <SortTH label="Reported By" field="reported_by"      sort={sort} onSort={handleSort} />
                 <SortTH label="Tanggal"     field="reported_at"      sort={sort} onSort={handleSort} />
@@ -1017,7 +1044,13 @@ export default function Problems() {
                     ) : <span className="text-slate-300 text-xs">—</span>}
                   </td>
                   <td className="table-td"><CategoryBadge category={p.problem_category} /></td>
-                  <td className="table-td"><PriorityBadge priority={p.priority} /></td>
+                  <td className="table-td">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      p.is_repeat === 'N' ? 'bg-blue-50 text-blue-600' : 'bg-orange-50 text-orange-600'
+                    }`}>
+                      {p.is_repeat === 'N' ? 'Baru' : 'Repeat'}
+                    </span>
+                  </td>
                   <td className="table-td"><StatusBadge status={p.status} /></td>
                   <td className="table-td text-xs text-slate-600">{p.reported_by}</td>
                   <td className="table-td text-[11px] text-slate-500">{fmtDate(p.reported_at)}</td>

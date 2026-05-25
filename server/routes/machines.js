@@ -176,13 +176,13 @@ router.get('/:id/chart-data', (req, res) => {
 // ── POST /api/machines ────────────────────────────────────────────────────
 router.post('/', (req, res) => {
   try {
-    const { machine_code, machine_name, machine_type, location, department, status } = req.body;
+    const { machine_code, machine_name, machine_type, line, location, department, status } = req.body;
     if (!machine_code || !machine_name)
       return res.status(400).json({ error: 'machine_code and machine_name are required' });
     const result = db.prepare(`
-      INSERT INTO machines (machine_code, machine_name, machine_type, location, department, status)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(machine_code, machine_name, machine_type || null, location || null, department || null, status || 'active');
+      INSERT INTO machines (machine_code, machine_name, machine_type, line, location, department, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(machine_code, machine_name, machine_type || null, line || null, location || null, department || null, status || 'active');
     res.status(201).json({ id: result.lastInsertRowid, message: 'Machine created' });
   } catch (err) {
     if (err.message.includes('UNIQUE')) return res.status(400).json({ error: 'Kode mesin sudah ada' });
@@ -193,11 +193,11 @@ router.post('/', (req, res) => {
 // ── PUT /api/machines/:id ─────────────────────────────────────────────────
 router.put('/:id', (req, res) => {
   try {
-    const { machine_code, machine_name, machine_type, location, department, status } = req.body;
+    const { machine_code, machine_name, machine_type, line, location, department, status } = req.body;
     const result = db.prepare(`
-      UPDATE machines SET machine_code=?, machine_name=?, machine_type=?, location=?, department=?, status=?
+      UPDATE machines SET machine_code=?, machine_name=?, machine_type=?, line=?, location=?, department=?, status=?
       WHERE id=?
-    `).run(machine_code, machine_name, machine_type, location, department, status, req.params.id);
+    `).run(machine_code, machine_name, machine_type, line || null, location, department, status, req.params.id);
     if (!result.changes) return res.status(404).json({ error: 'Machine not found' });
     res.json({ message: 'Machine updated' });
   } catch (err) { res.status(500).json({ error: err.message }); }

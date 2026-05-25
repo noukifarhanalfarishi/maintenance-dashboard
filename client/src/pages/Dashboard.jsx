@@ -7,10 +7,10 @@ import {
 import {
   AlertTriangle, Clock, Gauge, TrendingUp, TrendingDown,
   Cpu, X, Calendar, ChevronRight, Minus, Wrench, AlertCircle,
-  CheckCircle2, Hourglass, Package,
+  CheckCircle2, Hourglass, Package, RotateCcw,
 } from 'lucide-react'
 import { dashboardApi, problemsApi } from '../api/client'
-import { StatusBadge, PriorityBadge, CategoryBadge } from '../components/Badge'
+import { StatusBadge, CategoryBadge } from '../components/Badge'
 
 // ── Colour constants ────────────────────────────────────────────────────────
 const NAVY   = '#1a1a2e'
@@ -25,6 +25,19 @@ const CAT_COLOR = {
   Other:      '#94a3b8',
 }
 const PALETTE = Object.values(CAT_COLOR)
+
+const LINE_COLOR = {
+  Atsuen:      '#e94560',
+  Sekisou:     '#3b82f6',
+  Suchohosei:  '#f59e0b',
+  Waterjet:    '#06b6d4',
+  Element:     '#8b5cf6',
+  Sucho:       '#10b981',
+  Wagiri:      '#f97316',
+  Senjouki:    '#ec4899',
+  Kansho:      '#84cc16',
+  Laser:       '#a855f7',
+}
 
 // ── Utility ─────────────────────────────────────────────────────────────────
 function getPeriodDates(period, cStart, cEnd) {
@@ -188,7 +201,6 @@ function DetailDrawer({ problem, onClose }) {
         <div className="flex-1 p-5 space-y-5">
           {/* Badges row */}
           <div className="flex flex-wrap gap-2">
-            <PriorityBadge priority={problem.priority} />
             <StatusBadge status={problem.status} />
             <CategoryBadge category={problem.problem_category} />
           </div>
@@ -284,6 +296,10 @@ export default function Dashboard() {
   const [pareto,     setPareto]     = useState([])
   const [recent,     setRecent]     = useState([])
   const [lowStock,   setLowStock]   = useState([])
+  const [paretoLine,    setParetoLine]    = useState([])
+  const [paretoMachine, setParetoMachine] = useState([])
+  const [newRepeat,     setNewRepeat]     = useState(null)
+  const [machineMode,   setMachineMode]   = useState('count') // 'count' | 'dt'
 
   const { start, end } = useMemo(() => getPeriodDates(period, cStart, cEnd), [period, cStart, cEnd])
 
@@ -298,7 +314,10 @@ export default function Dashboard() {
       dashboardApi.getPareto({ start, end }),
       dashboardApi.getRecentProblems({ start, end, limit: 10 }),
       dashboardApi.getLowStock(),
-    ]).then(([s, w, cat, td, par, rec, ls]) => {
+      dashboardApi.getParetoLine({ start, end }),
+      dashboardApi.getParetoMachine({ start, end }),
+      dashboardApi.getNewRepeat({ start, end }),
+    ]).then(([s, w, cat, td, par, rec, ls, pl, pm, nr]) => {
       setSummary(s.data)
       setWeekly(w.data)
       setByCategory(cat.data)
@@ -306,6 +325,9 @@ export default function Dashboard() {
       setPareto(par.data)
       setRecent(rec.data)
       setLowStock(ls.data)
+      setParetoLine(pl.data)
+      setParetoMachine(pm.data)
+      setNewRepeat(nr.data)
       setLoading(false)
     }).catch(() => setLoading(false))
   }, [start, end])
@@ -357,11 +379,11 @@ export default function Dashboard() {
 
       {/* ── ROW 1: KPI Cards ──────────────────────────────────────────────── */}
       {loading ? (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[...Array(4)].map((_, i) => <Skeleton key={i} h="h-36" />)}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+          {[...Array(5)].map((_, i) => <Skeleton key={i} h="h-36" />)}
         </div>
       ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           {/* 1. Total Problem */}
           <KpiCard
             icon={AlertTriangle}
@@ -416,6 +438,30 @@ export default function Dashboard() {
             accentClass="kpi-purple"
             iconClass="bg-violet-500"
           />
+          {/* 5. Repeat Rate */}
+          <div className="card kpi-orange hover:shadow-card-hover transition-shadow">
+            <div className="flex items-start justify-between mb-4">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-rose-500 shrink-0">
+                <RotateCcw size={18} className="text-white" strokeWidth={2.2} />
+              </div>
+              <span className={`text-[11px] font-bold px-2 py-1 rounded-full ${
+                newRepeat?.summary?.total && (newRepeat.summary.repeat_count / newRepeat.summary.total) > 0.8
+                  ? 'bg-red-50 text-red-500' : 'bg-slate-100 text-slate-500'
+              }`}>
+                {newRepeat?.summary?.total
+                  ? `${Math.round(newRepeat.summary.repeat_count / newRepeat.summary.total * 100)}%`
+                  : '—'
+                }
+              </span>
+            </div>
+            <p className="text-[26px] font-bold text-slate-900 leading-none tracking-tight">
+              {newRepeat?.summary?.repeat_count ?? '—'}
+            </p>
+            <p className="text-xs font-semibold text-slate-500 mt-1.5 uppercase tracking-wide">Repeat Problem</p>
+            <p className="text-[11px] text-slate-400 mt-1">
+              Baru: {newRepeat?.summary?.new_count ?? '—'} · Total: {newRepeat?.summary?.total ?? '—'}
+            </p>
+          </div>
         </div>
       )}
 
@@ -583,6 +629,166 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* ── ROW 3B: Pareto per Line + New vs Repeat ─────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
+
+        {/* Pareto per Line — 3/5 */}
+        <div className="card lg:col-span-3">
+          <div className="flex items-center justify-between mb-1">
+            <p className="card-title !mb-0">Pareto Problem per Line</p>
+          </div>
+          <p className="text-[11px] text-slate-400 mb-4">Bar = jumlah problem · Garis = kumulatif %</p>
+
+          {loading ? <Skeleton h="h-52" /> : paretoLine.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-48 text-slate-300">
+              <AlertTriangle size={32} className="mb-2" />
+              <p className="text-sm">Belum ada data line</p>
+              <p className="text-xs mt-1 text-slate-400">Isi kolom "Line" pada data Mesin</p>
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={200}>
+              <ComposedChart data={paretoLine} margin={{ left: -16, right: 20, top: 4, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                <YAxis yAxisId="l" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                <YAxis yAxisId="r" orientation="right" domain={[0, 100]}
+                  tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false}
+                  tickFormatter={v => `${v}%`} />
+                <Tooltip content={<ChartTip />} />
+                <ReferenceLine yAxisId="r" y={80} stroke="#f59e0b" strokeDasharray="4 3" strokeWidth={1.5}
+                  label={{ value: '80%', position: 'insideTopRight', fontSize: 9, fill: '#f59e0b', dy: -4 }} />
+                <Bar yAxisId="l" dataKey="count" name="Jumlah" radius={[4, 4, 0, 0]} maxBarSize={40}>
+                  {paretoLine.map((d, i) => (
+                    <Cell key={i} fill={LINE_COLOR[d.name] || PALETTE[i % PALETTE.length]} />
+                  ))}
+                  <LabelList dataKey="count" position="top"
+                    style={{ fontSize: 10, fontWeight: 700, fill: '#64748b' }} />
+                </Bar>
+                <Line yAxisId="r" type="monotone" dataKey="cumulative_pct" name="Kumulatif %"
+                  stroke={ACCENT} strokeWidth={2.5} dot={{ r: 4, fill: ACCENT, stroke: '#fff', strokeWidth: 2 }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+
+        {/* New vs Repeat — 2/5 */}
+        <div className="card lg:col-span-2 flex flex-col">
+          <p className="card-title">New vs Repeat Problem</p>
+
+          {loading ? <Skeleton h="h-48" /> : (
+            <>
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-center">
+                  <p className="text-3xl font-bold text-blue-600 leading-none">{newRepeat?.summary?.new_count ?? 0}</p>
+                  <p className="text-xs font-semibold text-blue-500 mt-1.5 uppercase tracking-wide">Problem Baru</p>
+                  <p className="text-[11px] text-blue-400 mt-0.5">
+                    {newRepeat?.summary?.total ? Math.round(newRepeat.summary.new_count / newRepeat.summary.total * 100) : 0}%
+                  </p>
+                </div>
+                <div className="bg-red-50 border border-red-100 rounded-xl p-3 text-center">
+                  <p className="text-3xl font-bold text-red-500 leading-none">{newRepeat?.summary?.repeat_count ?? 0}</p>
+                  <p className="text-xs font-semibold text-red-500 mt-1.5 uppercase tracking-wide">Repeat Problem</p>
+                  <p className="text-[11px] text-red-400 mt-0.5">
+                    {newRepeat?.summary?.total ? Math.round(newRepeat.summary.repeat_count / newRepeat.summary.total * 100) : 0}%
+                  </p>
+                </div>
+              </div>
+
+              {/* Repeat rate bar */}
+              <div className="mb-4 px-1">
+                <div className="flex justify-between text-[10px] text-slate-500 mb-1.5">
+                  <span className="font-semibold uppercase tracking-wide">Repeat Rate</span>
+                  <span className={`font-bold ${
+                    newRepeat?.summary?.total && (newRepeat.summary.repeat_count / newRepeat.summary.total) > 0.8
+                      ? 'text-red-500' : 'text-slate-600'
+                  }`}>
+                    {newRepeat?.summary?.total ? Math.round(newRepeat.summary.repeat_count / newRepeat.summary.total * 100) : 0}%
+                  </span>
+                </div>
+                <div className="w-full bg-slate-100 rounded-full h-2">
+                  <div className="bg-red-400 h-2 rounded-full transition-all"
+                    style={{ width: `${newRepeat?.summary?.total ? Math.round(newRepeat.summary.repeat_count / newRepeat.summary.total * 100) : 0}%` }} />
+                </div>
+              </div>
+
+              {/* Monthly trend */}
+              <div className="flex-1">
+                <p className="text-[10px] text-slate-400 mb-2 font-semibold uppercase tracking-wide">Tren 6 Bulan</p>
+                <ResponsiveContainer width="100%" height={110}>
+                  <BarChart data={newRepeat?.monthly || []} margin={{ left: -20, right: 4, top: 4, bottom: 0 }} barCategoryGap="25%">
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 9, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 9, fill: '#94a3b8' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                    <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8, border: '1px solid #e2e8f0' }} />
+                    <Bar dataKey="new_count"    name="Baru"   fill="#3b82f6" radius={[2,2,0,0]} maxBarSize={14} stackId="s" />
+                    <Bar dataKey="repeat_count" name="Repeat" fill="#f87171" radius={[2,2,0,0]} maxBarSize={14} stackId="s" />
+                    <Legend iconType="circle" iconSize={6} formatter={v => <span style={{fontSize:10,color:'#64748b'}}>{v}</span>} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* ── ROW 3C: Pareto per Mesin ────────────────────────────────── */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-1">
+          <p className="card-title !mb-0">Pareto Problem per Mesin (Top 15)</p>
+          <div className="flex items-center bg-slate-100 rounded-lg p-0.5 gap-0.5">
+            {[{ v: 'count', label: 'Jumlah' }, { v: 'dt', label: 'Downtime' }].map(opt => (
+              <button key={opt.v} onClick={() => setMachineMode(opt.v)}
+                className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
+                  machineMode === opt.v ? 'bg-white shadow text-navy-900' : 'text-slate-500 hover:text-slate-700'
+                }`}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <p className="text-[11px] text-slate-400 mb-4">
+          {machineMode === 'count' ? 'Diurutkan berdasarkan jumlah problem' : 'Diurutkan berdasarkan total downtime (menit)'}
+        </p>
+
+        {loading ? <Skeleton h="h-72" /> : paretoMachine.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-48 text-slate-300">
+            <Cpu size={32} className="mb-2" />
+            <p className="text-sm">Tidak ada data mesin</p>
+          </div>
+        ) : (() => {
+          const sorted = machineMode === 'count'
+            ? [...paretoMachine].sort((a, b) => b.count - a.count)
+            : [...paretoMachine].sort((a, b) => b.total_dt - a.total_dt)
+          const maxVal = machineMode === 'count'
+            ? Math.max(...sorted.map(d => d.count))
+            : Math.max(...sorted.map(d => d.total_dt))
+          return (
+            <div className="space-y-1.5">
+              {sorted.map((d, i) => {
+                const val = machineMode === 'count' ? d.count : d.total_dt
+                const pct = maxVal > 0 ? (val / maxVal) * 100 : 0
+                const color = i === 0 ? ACCENT : i === 1 ? '#f97316' : i === 2 ? '#f59e0b' : '#3b82f6'
+                return (
+                  <div key={i} className="flex items-center gap-3">
+                    <span className="text-[11px] font-mono font-bold text-slate-400 w-5 text-right shrink-0">{i+1}</span>
+                    <span className="text-[11px] font-semibold text-slate-700 w-32 shrink-0 truncate" title={d.machine_code}>{d.machine_code}</span>
+                    {d.line && <span className="text-[9px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full shrink-0">{d.line}</span>}
+                    <div className="flex-1 bg-slate-100 rounded-full h-4 overflow-hidden">
+                      <div className="h-full rounded-full flex items-center justify-end pr-2 transition-all"
+                        style={{ width: `${pct}%`, background: color, minWidth: 24 }}>
+                        <span className="text-[10px] font-bold text-white leading-none">
+                          {machineMode === 'count' ? val : `${val}m`}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )
+        })()}
+      </div>
+
       {/* ── ROW 4: Recent Problems Table ────────────────────────────────────── */}
       <div className="card !p-0 overflow-hidden">
         {/* Table header */}
@@ -603,7 +809,7 @@ export default function Dashboard() {
           <table className="w-full">
             <thead className="bg-slate-50 border-b border-slate-100">
               <tr>
-                {['Ticket #', 'Mesin', 'Kategori', 'Priority', 'Status', 'Dilaporkan', 'Teknisi', ''].map(h => (
+                {['Ticket #', 'Mesin', 'Kategori', 'Status', 'Dilaporkan', 'Teknisi', ''].map(h => (
                   <th key={h} className="table-th">{h}</th>
                 ))}
               </tr>
@@ -612,7 +818,7 @@ export default function Dashboard() {
               {loading ? (
                 [...Array(5)].map((_, i) => (
                   <tr key={i}>
-                    {[...Array(8)].map((_, j) => (
+                    {[...Array(7)].map((_, j) => (
                       <td key={j} className="table-td">
                         <div className="h-4 bg-slate-100 rounded animate-pulse" style={{ width: `${60 + (j * 7) % 40}%` }} />
                       </td>
@@ -621,7 +827,7 @@ export default function Dashboard() {
                 ))
               ) : recent.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="table-td text-center py-12 text-slate-400">
+                  <td colSpan={7} className="table-td text-center py-12 text-slate-400">
                     <AlertCircle size={28} className="mx-auto mb-2 opacity-30" />
                     Tidak ada problem dalam periode ini
                   </td>
@@ -642,7 +848,6 @@ export default function Dashboard() {
                     <p className="text-[10px] text-slate-400 truncate max-w-[110px]">{p.machine_name}</p>
                   </td>
                   <td className="table-td"><CategoryBadge category={p.problem_category} /></td>
-                  <td className="table-td"><PriorityBadge priority={p.priority} /></td>
                   <td className="table-td"><StatusBadge status={p.status} /></td>
                   <td className="table-td text-[11px] text-slate-400">
                     <p>{new Date(p.reported_at).toLocaleDateString('id-ID')}</p>

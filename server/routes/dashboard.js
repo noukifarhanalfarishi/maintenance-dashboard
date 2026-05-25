@@ -228,4 +228,108 @@ router.get('/low-stock', (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+router.get('/pareto-line', (req, res) => {
+  try {
+    const { start, end } = parsePeriod(req.query);
+    const raw = db.prepare(`
+      WITH prob_dt AS (
+        SELECT p.id, p.machine_id, COALESCE(SUM(r.downtime_minutes),0) dt
+        FROM problems p
+        LEFT JOIN repairs r ON r.problem_id = p.id
+        WHERE date(p.reported_at) BETWEEN ? AND ?
+        GROUP BY p.id
+      )
+      SELECT
+        COALESCE(m.line,'(Tanpa Line)') name,
+        COUNT(pd.id) count,
+        COALESCE(SUM(pd.dt),0) total_dt
+      FROM prob_dt pd
+      LEFT JOIN machines m ON pd.machine_id = m.id
+      GROUP BY COALESCE(m.line,'(Tanpa Line)')
+      ORDER BY count DESC
+    `).all(start, end);
+
+    const total = raw.reduce((s,r) => s + r.count, 0);
+    let cum = 0;
+    const result = raw.map(r => {
+      cum += r.count;
+      return { ...r, pct: Math.round(r.count/total*100), cumulative_pct: Math.round(cum/total*100) };
+    });
+    res.json(result);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.get('/pareto-machine', (req, res) => {
+  try {
+    const { start, end } = parsePeriod(req.query);
+    const raw = db.prepare(`
+      WITH prob_dt AS (
+        SELECT p.id, p.machine_id, COALESCE(SUM(r.downtime_minutes),0) dt
+        FROM problems p
+        LEFT JOIN repairs r ON r.problem_id = p.id
+        WHERE date(p.reported_at) BETWEEN ? AND ?
+        GROUP BY p.id
+      )
+      SELECT
+        COALESCE(m.machine_code,'(Tanpa Mesin)') machine_code,
+        COALESCE(m.machine_name,'') machine_name,
+        COALESCE(m.line,'') line,
+        COUNT(pd.id) count,
+        COALESCE(SUM(pd.dt),0) total_dt
+      FROM prob_dt pd
+      LEFT JOIN machines m ON pd.machine_id = m.id
+      GROUP BY pd.machine_id
+      ORDER BY count DESC
+      LIMIT 15
+    `).all(start, end);
+
+    const total = raw.reduce((s,r) => s + r.count, 0);
+    let cum = 0;
+    const result = raw.map(r => {
+      cum += r.count;
+      return { ...r, pct: Math.round(r.count/total*100), cumulative_pct: Math.round(cum/total*100) };
+    });
+    res.json(result);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.get('/new-repeat', (req, res) => {
+  try {
+    const { start, end } = parsePeriod(req.query);
+
+    const summary = db.prepare(`
+      SELECT
+        SUM(CASE WHEN is_repeat='N' THEN 1 ELSE 0 END) new_count,
+        SUM(CASE WHEN is_repeat='R' OR is_repeat IS NULL THEN 1 ELSE 0 END) repeat_count,
+        COUNT(*) total
+      FROM problems WHERE date(reported_at) BETWEEN ? AND ?
+    `).get(start, end);
+
+    const monthly = db.prepare(`
+      SELECT
+        strftime('%Y-%m', reported_at) month,
+        SUM(CASE WHEN is_repeat='N' THEN 1 ELSE 0 END) new_count,
+        SUM(CASE WHEN is_repeat='R' OR is_repeat IS NULL THEN 1 ELSE 0 END) repeat_count
+      FROM problems
+      WHERE reported_at >= date('now','-6 months')
+      GROUP BY month ORDER BY month
+    `).all();
+
+    const filled = [];
+    const now = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = d.toISOString().slice(0,7);
+      const found = monthly.find(m => m.month === key);
+      filled.push(found || { month: key, new_count: 0, repeat_count: 0 });
+    }
+    filled.forEach(r => {
+      const d = new Date(r.month + '-01');
+      r.label = d.toLocaleDateString('id-ID', { month:'short', year:'2-digit' });
+    });
+
+    res.json({ summary, monthly: filled });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 module.exports = router;

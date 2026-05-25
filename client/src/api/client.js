@@ -36,6 +36,9 @@ export const dashboardApi = {
   getTopDowntime:  (p) => api.get('/dashboard/top-downtime',    { params: p }),
   getPareto:       (p) => api.get('/dashboard/pareto',          { params: p }),
   getRecentProblems:(p)=> api.get('/dashboard/recent-problems', { params: p }),
+  getParetoLine:    (p) => api.get('/dashboard/pareto-line',    { params: p }),
+  getParetoMachine: (p) => api.get('/dashboard/pareto-machine', { params: p }),
+  getNewRepeat:     (p) => api.get('/dashboard/new-repeat',     { params: p }),
 }
 
 export const machinesApi = {
