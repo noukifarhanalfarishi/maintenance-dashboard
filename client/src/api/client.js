@@ -25,20 +25,13 @@ export const authApi = {
 }
 
 export const dashboardApi = {
-  getSummary:          ()    => api.get('/dashboard/summary'),
-  getMonthlyTrend:     ()    => api.get('/dashboard/monthly-trend'),
-  getTopMachines:      ()    => api.get('/dashboard/top-machines'),
-  getDowntimeCategory: ()    => api.get('/dashboard/downtime-category'),
-  getLowStock:         ()    => api.get('/dashboard/low-stock'),
-  getSummaryV2:    (p) => api.get('/dashboard/summary-v2',      { params: p }),
-  getWeeklyTrend:  ()  => api.get('/dashboard/weekly-trend'),
-  getByCategory:   (p) => api.get('/dashboard/by-category',     { params: p }),
-  getTopDowntime:  (p) => api.get('/dashboard/top-downtime',    { params: p }),
-  getPareto:       (p) => api.get('/dashboard/pareto',          { params: p }),
-  getRecentProblems:(p)=> api.get('/dashboard/recent-problems', { params: p }),
-  getParetoLine:    (p) => api.get('/dashboard/pareto-line',    { params: p }),
-  getParetoMachine: (p) => api.get('/dashboard/pareto-machine', { params: p }),
-  getNewRepeat:     (p) => api.get('/dashboard/new-repeat',     { params: p }),
+  getSummaryV2:      (p) => api.get('/dashboard/summary-v2',      { params: p }),
+  getWeeklyTrend:    ()  => api.get('/dashboard/weekly-trend'),
+  getByCategory:     (p) => api.get('/dashboard/by-category',     { params: p }),
+  getTopDowntime:    (p) => api.get('/dashboard/top-downtime',    { params: p }),
+  getLowStock:       ()  => api.get('/dashboard/low-stock'),
+  getRecentActivity: (p) => api.get('/dashboard/recent-activity', { params: p }),
+  getPmSummary:      ()  => api.get('/dashboard/pm-summary'),
 }
 
 export const machinesApi = {
@@ -47,27 +40,33 @@ export const machinesApi = {
   getById:      (id)    => api.get(`/machines/${id}`),
   getStats:     (id)    => api.get(`/machines/${id}/stats`),
   getChartData: (id)    => api.get(`/machines/${id}/chart-data`),
+  getLogs:      (id, p) => api.get(`/machines/${id}/logs`, { params: p }),
   create:       (d)     => api.post('/machines', d),
   update:       (id, d) => api.put(`/machines/${id}`, d),
   delete:       (id)    => api.delete(`/machines/${id}`),
 }
 
-export const problemsApi = {
-  getAll:    (p)     => api.get('/problems',           { params: p }),
-  getById:   (id)    => api.get(`/problems/${id}`),
-  create:    (d)     => api.post('/problems', d),
-  update:    (id, d) => api.put(`/problems/${id}`, d),
-  patch:     (id, d) => api.patch(`/problems/${id}`, d),
-  delete:    (id)    => api.delete(`/problems/${id}`),
-  addRepair: (id, d) => api.post(`/problems/${id}/repairs`, d),
+export const dailyLogsApi = {
+  getAll:  (p)     => api.get('/daily-logs',        { params: p }),
+  getById: (id)    => api.get(`/daily-logs/${id}`),
+  create:  (d)     => api.post('/daily-logs', d),
+  update:  (id, d) => api.put(`/daily-logs/${id}`, d),
+  patch:   (id, d) => api.patch(`/daily-logs/${id}`, d),
+  delete:  (id)    => api.delete(`/daily-logs/${id}`),
 }
 
-export const repairsApi = {
-  getAll:   (p)     => api.get('/repairs',       { params: p }),
-  getById:  (id)    => api.get(`/repairs/${id}`),
-  create:   (d)     => api.post('/repairs', d),
-  update:   (id, d) => api.put(`/repairs/${id}`, d),
-  delete:   (id)    => api.delete(`/repairs/${id}`),
+export const pmSchedulesApi = {
+  getAll:    (p)     => api.get('/pm-schedules', { params: p }),
+  getById:   (id)    => api.get(`/pm-schedules/${id}`),
+  create:    (d)     => api.post('/pm-schedules', d),
+  update:    (id, d) => api.put(`/pm-schedules/${id}`, d),
+  complete:  (id, d) => api.patch(`/pm-schedules/${id}/complete`, d),
+  delete:    (id)    => api.delete(`/pm-schedules/${id}`),
+}
+
+export const shiftsApi = {
+  getAll: () => api.get('/shifts'),
+  update: (id, d) => api.put(`/shifts/${id}`, d),
 }
 
 export const sparePartsApi = {
@@ -87,6 +86,7 @@ export const usersApi = {
 }
 
 export const reportsApi = {
-  getSummary:      (p)       => api.get('/reports/summary',       { params: p }),
+  getDaily:        (p)       => api.get('/reports/daily',         { params: p }),
+  getMonthly:      (p)       => api.get('/reports/monthly',       { params: p }),
   getMachineReport:(id, p)   => api.get(`/reports/machine/${id}`, { params: p }),
 }

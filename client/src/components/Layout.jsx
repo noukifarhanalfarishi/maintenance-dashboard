@@ -5,9 +5,9 @@ import Header from './Header'
 
 const PAGE_META = {
   '/dashboard':   { title: 'Dashboard Overview',   sub: 'Ringkasan performa maintenance secara real-time' },
-  '/problems':    { title: 'Problem Tracking',      sub: 'Pencatatan dan manajemen problem mesin' },
-  '/machines':    { title: 'Data Mesin',            sub: 'Master data mesin dan riwayat problem' },
-  '/repairs':     { title: 'Catatan Perbaikan',     sub: 'Log tindakan perbaikan & downtime' },
+  '/daily-log':   { title: 'Daily Activity Log',   sub: 'Pencatatan aktivitas Planning (PM) & Trouble harian' },
+  '/pm-schedule': { title: 'PM Schedule',           sub: 'Kalender dan jadwal preventive maintenance mesin' },
+  '/machines':    { title: 'Data Mesin',            sub: 'Master data mesin dan riwayat aktivitas maintenance' },
   '/spare-parts': { title: 'Spare Parts',           sub: 'Manajemen stok spare part' },
   '/reports':     { title: 'Reports',               sub: 'Generate laporan dan export data maintenance' },
   '/users':       { title: 'Manajemen User',        sub: 'Pengaturan akses dan peran pengguna' },

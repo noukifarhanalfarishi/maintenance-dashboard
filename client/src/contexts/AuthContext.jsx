@@ -5,10 +5,10 @@ const AuthContext = createContext(null)
 
 // Role → allowed route slugs
 const ROLE_PERMISSIONS = {
-  Admin:      ['dashboard', 'problems', 'machines', 'repairs', 'spare-parts', 'reports', 'users'],
-  Supervisor: ['dashboard', 'problems', 'machines', 'repairs', 'spare-parts', 'reports'],
-  Technician: ['dashboard', 'problems', 'machines', 'repairs', 'spare-parts'],
-  Operator:   ['dashboard', 'problems'],
+  Admin:      ['dashboard', 'daily-log', 'pm-schedule', 'machines', 'spare-parts', 'reports', 'users'],
+  Supervisor: ['dashboard', 'daily-log', 'pm-schedule', 'machines', 'spare-parts', 'reports'],
+  Technician: ['dashboard', 'daily-log', 'pm-schedule', 'machines', 'spare-parts'],
+  Operator:   ['dashboard', 'daily-log'],
 }
 
 const ROLE_COLOR = {

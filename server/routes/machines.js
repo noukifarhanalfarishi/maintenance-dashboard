@@ -2,6 +2,12 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 
+// NOTE: "problem" di sini = daily_logs dengan log_type='Trouble' (setara
+// konsep lama "problems" pasca migrasi ke Daily Maintenance Activity Log).
+// Nama field response (total_problems, open_problems, dst) dipertahankan
+// apa adanya supaya halaman client (Machines.jsx, Dashboard.jsx) yang sudah
+// ada tetap jalan tanpa perubahan.
+
 // ── GET /api/machines — list with aggregated stats ─────────────────────────
 router.get('/', (req, res) => {
   try {
@@ -20,12 +26,10 @@ router.get('/', (req, res) => {
 
     const rows = db.prepare(`
       SELECT m.*,
-        (SELECT COUNT(*) FROM problems p WHERE p.machine_id = m.id)                        AS total_problems,
-        (SELECT COUNT(*) FROM problems p WHERE p.machine_id = m.id AND p.status != 'Closed') AS open_problems,
-        (SELECT COALESCE(SUM(r.downtime_minutes),0)
-           FROM repairs r JOIN problems p ON r.problem_id = p.id
-           WHERE p.machine_id = m.id)                                                       AS total_downtime,
-        (SELECT MAX(p.reported_at) FROM problems p WHERE p.machine_id = m.id)              AS last_problem_at
+        (SELECT COUNT(*) FROM daily_logs d WHERE d.machine_id = m.id AND d.log_type = 'Trouble')                          AS total_problems,
+        (SELECT COUNT(*) FROM daily_logs d WHERE d.machine_id = m.id AND d.log_type = 'Trouble' AND d.status != 'Completed') AS open_problems,
+        (SELECT COALESCE(SUM(d.downtime_minutes),0) FROM daily_logs d WHERE d.machine_id = m.id AND d.log_type = 'Trouble') AS total_downtime,
+        (SELECT MAX(d.start_time) FROM daily_logs d WHERE d.machine_id = m.id AND d.log_type = 'Trouble')                 AS last_problem_at
       FROM machines m
       ${where}
       ORDER BY m.machine_code
@@ -45,33 +49,52 @@ router.get('/meta', (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── GET /api/machines/:id — detail + problem history ──────────────────────
+// ── GET /api/machines/:id — detail + problem (Trouble log) history ─────────
 router.get('/:id', (req, res) => {
   try {
     const machine = db.prepare(`
       SELECT m.*,
-        (SELECT COUNT(*) FROM problems p WHERE p.machine_id = m.id)                        AS total_problems,
-        (SELECT COUNT(*) FROM problems p WHERE p.machine_id = m.id AND p.status != 'Closed') AS open_problems,
-        (SELECT COALESCE(SUM(r.downtime_minutes),0)
-           FROM repairs r JOIN problems p ON r.problem_id = p.id
-           WHERE p.machine_id = m.id)                                                       AS total_downtime
+        (SELECT COUNT(*) FROM daily_logs d WHERE d.machine_id = m.id AND d.log_type = 'Trouble')                          AS total_problems,
+        (SELECT COUNT(*) FROM daily_logs d WHERE d.machine_id = m.id AND d.log_type = 'Trouble' AND d.status != 'Completed') AS open_problems,
+        (SELECT COALESCE(SUM(d.downtime_minutes),0) FROM daily_logs d WHERE d.machine_id = m.id AND d.log_type = 'Trouble') AS total_downtime
       FROM machines m WHERE m.id = ?
     `).get(req.params.id);
 
     if (!machine) return res.status(404).json({ error: 'Machine not found' });
 
     const problems = db.prepare(`
-      SELECT p.id, p.ticket_number, p.problem_category, p.priority, p.status,
-             p.description, p.reported_by, p.reported_at, p.closed_at,
-             COALESCE((SELECT SUM(r.downtime_minutes) FROM repairs r WHERE r.problem_id = p.id), 0) AS downtime,
-             (SELECT r.technician FROM repairs r WHERE r.problem_id = p.id ORDER BY r.start_time LIMIT 1) AS technician
-      FROM problems p
-      WHERE p.machine_id = ?
-      ORDER BY p.reported_at DESC
+      SELECT d.id, d.log_number AS ticket_number, d.category AS problem_category, d.priority, d.status,
+             d.description, d.reported_by, d.start_time AS reported_at,
+             CASE WHEN d.status = 'Completed' THEN d.end_time ELSE NULL END AS closed_at,
+             d.downtime_minutes AS downtime, d.technician
+      FROM daily_logs d
+      WHERE d.machine_id = ? AND d.log_type = 'Trouble'
+      ORDER BY d.start_time DESC
       LIMIT 50
     `).all(req.params.id);
 
     res.json({ ...machine, problems });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── GET /api/machines/:id/logs — riwayat aktivitas (Planning + Trouble) ────
+// Dipakai oleh section "Activity History" di drawer detail mesin — beda dari
+// GET /:id yang hanya mengembalikan histori Trouble ("problems", dipertahankan
+// untuk kompatibilitas nama field lama).
+router.get('/:id/logs', (req, res) => {
+  try {
+    const { log_type, limit = 50 } = req.query;
+    const conds = ['machine_id = ?'], params = [req.params.id];
+    if (log_type && log_type !== 'all') { conds.push('log_type = ?'); params.push(log_type); }
+
+    const rows = db.prepare(`
+      SELECT id, log_number, log_type, category, priority, status, description, findings, action_taken,
+             technician, reported_by, start_time, end_time, downtime_minutes, log_date
+      FROM daily_logs WHERE ${conds.join(' AND ')}
+      ORDER BY start_time DESC LIMIT ?
+    `).all(...params, parseInt(limit));
+
+    res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -89,22 +112,22 @@ router.get('/:id/stats', (req, res) => {
     const q = (sql, ...p) => db.prepare(sql).get(...p);
 
     // Current & previous month
-    const curProb  = q("SELECT COUNT(*) c FROM problems WHERE machine_id=? AND date(reported_at) BETWEEN ? AND ?", id, curStart, curEnd);
-    const prevProb = q("SELECT COUNT(*) c FROM problems WHERE machine_id=? AND date(reported_at) BETWEEN ? AND ?", id, prevStart, prevEnd);
-    const curDT    = q("SELECT COALESCE(SUM(r.downtime_minutes),0) v FROM repairs r JOIN problems p ON r.problem_id=p.id WHERE p.machine_id=? AND date(r.start_time) BETWEEN ? AND ?", id, curStart, curEnd);
-    const prevDT   = q("SELECT COALESCE(SUM(r.downtime_minutes),0) v FROM repairs r JOIN problems p ON r.problem_id=p.id WHERE p.machine_id=? AND date(r.start_time) BETWEEN ? AND ?", id, prevStart, prevEnd);
+    const curProb  = q("SELECT COUNT(*) c FROM daily_logs WHERE machine_id=? AND log_type='Trouble' AND log_date BETWEEN ? AND ?", id, curStart, curEnd);
+    const prevProb = q("SELECT COUNT(*) c FROM daily_logs WHERE machine_id=? AND log_type='Trouble' AND log_date BETWEEN ? AND ?", id, prevStart, prevEnd);
+    const curDT    = q("SELECT COALESCE(SUM(downtime_minutes),0) v FROM daily_logs WHERE machine_id=? AND log_type='Trouble' AND log_date BETWEEN ? AND ?", id, curStart, curEnd);
+    const prevDT   = q("SELECT COALESCE(SUM(downtime_minutes),0) v FROM daily_logs WHERE machine_id=? AND log_type='Trouble' AND log_date BETWEEN ? AND ?", id, prevStart, prevEnd);
 
-    // MTTR — average of (closed_at - reported_at) for closed problems
+    // MTTR — rata-rata downtime_minutes untuk Trouble yang sudah Completed
     const mttr = q(`
-      SELECT ROUND(AVG((julianday(closed_at)-julianday(reported_at))*1440),0) v
-      FROM problems
-      WHERE machine_id=? AND status='Closed' AND closed_at IS NOT NULL
+      SELECT ROUND(AVG(downtime_minutes),0) v
+      FROM daily_logs
+      WHERE machine_id=? AND log_type='Trouble' AND status='Completed'
     `, id);
 
-    // MTBF — average gap between consecutive problem reports (hours)
+    // MTBF — rata-rata jarak antar kejadian Trouble berturut-turut (jam)
     const problemDates = db.prepare(
-      "SELECT reported_at FROM problems WHERE machine_id=? ORDER BY reported_at ASC"
-    ).all(id).map(r => new Date(r.reported_at));
+      "SELECT start_time FROM daily_logs WHERE machine_id=? AND log_type='Trouble' ORDER BY start_time ASC"
+    ).all(id).map(r => new Date(r.start_time));
 
     let mtbf_hours = null;
     if (problemDates.length >= 2) {
@@ -135,16 +158,12 @@ router.get('/:id/chart-data', (req, res) => {
 
     // 6-month monthly breakdown
     const monthly = db.prepare(`
-      SELECT strftime('%Y-%m', reported_at) month,
-             COUNT(*)                                                    AS total,
-             SUM(CASE WHEN status='Closed' THEN 1 ELSE 0 END)           AS closed,
-             COALESCE(SUM(
-               CASE WHEN status='Closed'
-                    THEN CAST((julianday(closed_at)-julianday(reported_at))*1440 AS INTEGER)
-               ELSE 0 END
-             ),0)                                                        AS downtime_min
-      FROM problems
-      WHERE machine_id=? AND reported_at >= date('now','-6 months')
+      SELECT strftime('%Y-%m', log_date) month,
+             COUNT(*)                                                AS total,
+             SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END)     AS closed,
+             COALESCE(SUM(downtime_minutes),0)                       AS downtime_min
+      FROM daily_logs
+      WHERE machine_id=? AND log_type='Trouble' AND log_date >= date('now','-6 months')
       GROUP BY month ORDER BY month
     `).all(id);
 
@@ -164,9 +183,9 @@ router.get('/:id/chart-data', (req, res) => {
 
     // Category breakdown
     const byCategory = db.prepare(`
-      SELECT problem_category name, COUNT(*) value
-      FROM problems WHERE machine_id=?
-      GROUP BY problem_category ORDER BY value DESC
+      SELECT category name, COUNT(*) value
+      FROM daily_logs WHERE machine_id=? AND log_type='Trouble'
+      GROUP BY category ORDER BY value DESC
     `).all(id);
 
     res.json({ monthly: filled, byCategory });
@@ -176,13 +195,16 @@ router.get('/:id/chart-data', (req, res) => {
 // ── POST /api/machines ────────────────────────────────────────────────────
 router.post('/', (req, res) => {
   try {
-    const { machine_code, machine_name, machine_type, line, location, department, status } = req.body;
+    const { machine_code, machine_name, machine_type, line, location, department, status, pm_daily, pm_weekly, pm_monthly } = req.body;
     if (!machine_code || !machine_name)
       return res.status(400).json({ error: 'machine_code and machine_name are required' });
     const result = db.prepare(`
-      INSERT INTO machines (machine_code, machine_name, machine_type, line, location, department, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(machine_code, machine_name, machine_type || null, line || null, location || null, department || null, status || 'active');
+      INSERT INTO machines (machine_code, machine_name, machine_type, line, location, department, status, pm_daily, pm_weekly, pm_monthly)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      machine_code, machine_name, machine_type || null, line || null, location || null, department || null, status || 'active',
+      pm_daily === undefined ? 1 : pm_daily, pm_weekly === undefined ? 1 : pm_weekly, pm_monthly === undefined ? 1 : pm_monthly
+    );
     res.status(201).json({ id: result.lastInsertRowid, message: 'Machine created' });
   } catch (err) {
     if (err.message.includes('UNIQUE')) return res.status(400).json({ error: 'Kode mesin sudah ada' });
@@ -193,35 +215,46 @@ router.post('/', (req, res) => {
 // ── PUT /api/machines/:id ─────────────────────────────────────────────────
 router.put('/:id', (req, res) => {
   try {
-    const { machine_code, machine_name, machine_type, line, location, department, status } = req.body;
+    const { machine_code, machine_name, machine_type, line, location, department, status, pm_daily, pm_weekly, pm_monthly } = req.body;
     const result = db.prepare(`
-      UPDATE machines SET machine_code=?, machine_name=?, machine_type=?, line=?, location=?, department=?, status=?
+      UPDATE machines SET machine_code=?, machine_name=?, machine_type=?, line=?, location=?, department=?, status=?,
+        pm_daily=?, pm_weekly=?, pm_monthly=?
       WHERE id=?
-    `).run(machine_code, machine_name, machine_type, line || null, location, department, status, req.params.id);
+    `).run(
+      machine_code, machine_name, machine_type, line || null, location, department, status,
+      pm_daily === undefined ? 1 : pm_daily, pm_weekly === undefined ? 1 : pm_weekly, pm_monthly === undefined ? 1 : pm_monthly,
+      req.params.id
+    );
     if (!result.changes) return res.status(404).json({ error: 'Machine not found' });
     res.json({ message: 'Machine updated' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ── DELETE /api/machines/:id ──────────────────────────────────────────────
+// daily_logs.machine_id bersifat NOT NULL (setiap log harus terhubung ke
+// mesin), jadi berbeda dari perilaku lama yang "melepas" (set NULL) histori
+// problem — di sini mesin yang masih punya daily_logs tidak boleh dihapus,
+// supaya histori maintenance tidak pernah hilang diam-diam. Nonaktifkan
+// (status: 'inactive') sebagai gantinya bila mesin sudah tidak dipakai.
 router.delete('/:id', (req, res) => {
   try {
     const machine = db.prepare('SELECT id FROM machines WHERE id = ?').get(req.params.id);
     if (!machine) return res.status(404).json({ error: 'Machine not found' });
 
-    // Hitung problem terkait sebelum dihapus (untuk info response)
-    const linked = db.prepare('SELECT COUNT(*) c FROM problems WHERE machine_id = ?').get(req.params.id).c;
+    const linked = db.prepare('SELECT COUNT(*) c FROM daily_logs WHERE machine_id = ?').get(req.params.id).c;
+    if (linked > 0) {
+      return res.status(400).json({
+        error: `Mesin ini memiliki ${linked} histori daily log dan tidak bisa dihapus. Nonaktifkan mesin (status: inactive) sebagai gantinya.`,
+      });
+    }
 
-    // Jalankan dalam transaction:
-    // 1. Putuskan relasi problem → mesin (set NULL, histori tetap terjaga)
-    // 2. Hapus mesin
     const del = db.transaction(() => {
-      db.prepare('UPDATE problems SET machine_id = NULL WHERE machine_id = ?').run(req.params.id);
+      db.prepare('DELETE FROM pm_schedules WHERE machine_id = ?').run(req.params.id);
       return db.prepare('DELETE FROM machines WHERE id = ?').run(req.params.id);
     });
 
     del();
-    res.json({ message: 'Machine deleted', problems_detached: linked });
+    res.json({ message: 'Machine deleted', problems_detached: 0 });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

@@ -1,18 +1,18 @@
 import { NavLink } from 'react-router-dom'
 import {
-  LayoutDashboard, AlertTriangle, Cpu, Wrench,
+  LayoutDashboard, ClipboardList, CalendarCheck, Settings,
   Package, Users, ChevronLeft, ChevronRight,
-  Activity, FileBarChart, X,
+  Activity, FileText, X,
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 
 const ALL_NAV = [
   { to: '/dashboard',   slug: 'dashboard',   icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/problems',    slug: 'problems',     icon: AlertTriangle,   label: 'Problem Tracking' },
-  { to: '/machines',    slug: 'machines',     icon: Cpu,             label: 'Data Mesin' },
-  { to: '/repairs',     slug: 'repairs',      icon: Wrench,          label: 'Perbaikan' },
+  { to: '/daily-log',   slug: 'daily-log',   icon: ClipboardList,   label: 'Daily Log' },
+  { to: '/pm-schedule', slug: 'pm-schedule', icon: CalendarCheck,   label: 'PM Schedule' },
+  { to: '/machines',    slug: 'machines',     icon: Settings,        label: 'Data Mesin' },
   { to: '/spare-parts', slug: 'spare-parts',  icon: Package,         label: 'Spare Parts' },
-  { to: '/reports',     slug: 'reports',      icon: FileBarChart,    label: 'Reports' },
+  { to: '/reports',     slug: 'reports',      icon: FileText,        label: 'Reports' },
   { to: '/users',       slug: 'users',        icon: Users,           label: 'Users' },
 ]
 

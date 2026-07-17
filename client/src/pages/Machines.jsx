@@ -3,14 +3,33 @@ import {
   Plus, Search, X, LayoutGrid, Table2, Cpu, MapPin, Building2,
   Wrench, Clock, TrendingUp, TrendingDown, Minus, Loader2, Pencil,
   Trash2, AlertTriangle, CheckCircle2, ChevronRight, BarChart3,
-  AlertCircle, Save,
+  AlertCircle, Save, CalendarCheck, ClipboardList,
 } from 'lucide-react'
 import {
   BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
-import { machinesApi } from '../api/client'
-import { StatusBadge, CategoryBadge } from '../components/Badge'
+import { machinesApi, pmSchedulesApi } from '../api/client'
+import { useAuth } from '../contexts/AuthContext'
+import { useConfirm } from '../contexts/ConfirmContext'
+import { StatusBadge, CategoryBadge, LogTypeBadge } from '../components/Badge'
+
+const PM_STATUS_STYLE = {
+  'On Track': 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+  'Due Soon': 'bg-amber-100   text-amber-700   border border-amber-200',
+  'Overdue':  'bg-red-100     text-red-700     border border-red-200',
+}
+function pmStatus(sched) {
+  if (!sched.next_due_date) return 'On Track'
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const diffDays = Math.round((new Date(sched.next_due_date) - today) / 86400000)
+  if (diffDays < 0) return 'Overdue'
+  if (diffDays <= 3) return 'Due Soon'
+  return 'On Track'
+}
+function PmStatusBadge({ status }) {
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${PM_STATUS_STYLE[status]}`}>{status}</span>
+}
 
 // ── Constants ────────────────────────────────────────────────────────────
 const MACHINE_TYPES = [
@@ -172,11 +191,21 @@ function KpiMini({ icon: Icon, label, value, sub, change, lowerIsBetter, color }
 }
 
 // ── Machine Detail Drawer ─────────────────────────────────────────────────
-function MachineDetailDrawer({ id, onClose, onEdit }) {
+function MachineDetailDrawer({ id, onClose, onEdit, showToast }) {
+  const { user } = useAuth()
+  const confirm = useConfirm()
+  const canManage = user?.role === 'Admin' || user?.role === 'Supervisor'
+
   const [machine, setMachine]       = useState(null)
   const [stats, setStats]           = useState(null)
   const [chartData, setChartData]   = useState(null)
   const [loading, setLoading]       = useState(true)
+
+  const [pmSchedules, setPmSchedules] = useState([])
+  const [activityTab, setActivityTab] = useState('all') // 'all' | 'Planning' | 'Trouble'
+  const [activityLogs, setActivityLogs] = useState([])
+  const [activityLoading, setActivityLoading] = useState(true)
+  const [marking, setMarking] = useState(false)
 
   useEffect(() => {
     setLoading(true)
@@ -184,13 +213,52 @@ function MachineDetailDrawer({ id, onClose, onEdit }) {
       machinesApi.getById(id),
       machinesApi.getStats(id),
       machinesApi.getChartData(id),
-    ]).then(([m, s, c]) => {
+      pmSchedulesApi.getAll({ machine_id: id }),
+    ]).then(([m, s, c, pm]) => {
       setMachine(m.data)
       setStats(s.data)
       setChartData(c.data)
+      setPmSchedules(pm.data)
       setLoading(false)
     }).catch(() => setLoading(false))
   }, [id])
+
+  const loadActivity = useCallback(() => {
+    setActivityLoading(true)
+    machinesApi.getLogs(id, { log_type: activityTab === 'all' ? undefined : activityTab, limit: 50 })
+      .then(r => setActivityLogs(r.data))
+      .catch(() => {})
+      .finally(() => setActivityLoading(false))
+  }, [id, activityTab])
+
+  useEffect(() => { loadActivity() }, [loadActivity])
+
+  const reloadPm = () => pmSchedulesApi.getAll({ machine_id: id }).then(r => setPmSchedules(r.data)).catch(() => {})
+
+  const pmTotal = pmSchedules.filter(s => s.is_active).length
+  const pmOverdue = pmSchedules.filter(s => s.is_active && pmStatus(s) === 'Overdue').length
+  const pmOnTrack = pmTotal - pmOverdue
+  const pmComplianceRate = pmTotal > 0 ? Math.round((pmOnTrack / pmTotal) * 100) : 100
+
+  const handleMarkPmDone = async (sched) => {
+    const ok = await confirm({
+      title: 'Tandai PM Selesai?',
+      message: `Tandai PM selesai untuk ${sched.pm_type}?`,
+      type: 'info',
+    })
+    if (!ok) return
+    setMarking(sched.id)
+    try {
+      await pmSchedulesApi.complete(sched.id, {
+        technician: sched.assigned_to || user?.full_name || 'Teknisi',
+        reported_by: user?.full_name || '',
+      })
+      reloadPm(); loadActivity()
+      showToast?.(`PM ${sched.pm_type} ditandai selesai`, 'success')
+    } catch (err) {
+      showToast?.(err.response?.data?.error || 'Gagal update PM schedule', 'error')
+    } finally { setMarking(false) }
+  }
 
   if (loading || !machine) return (
     <>
@@ -235,10 +303,12 @@ function MachineDetailDrawer({ id, onClose, onEdit }) {
               </div>
             </div>
             <div className="flex items-center gap-2 ml-3 shrink-0">
-              <button onClick={() => onEdit(machine)}
-                className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-white/70 hover:text-white transition-colors">
-                <Pencil size={14}/>
-              </button>
+              {canManage && (
+                <button onClick={() => onEdit(machine)}
+                  className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-white/70 hover:text-white transition-colors">
+                  <Pencil size={14}/>
+                </button>
+              )}
               <button onClick={onClose} className="text-white/50 hover:text-white">
                 <X size={18}/>
               </button>
@@ -249,10 +319,10 @@ function MachineDetailDrawer({ id, onClose, onEdit }) {
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
 
-          {/* KPI row — 4 cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {/* KPI row — 5 cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             <KpiMini
-              icon={AlertTriangle} label="Problem Bulan Ini"
+              icon={AlertTriangle} label="Trouble Bulan Ini"
               value={stats?.currentMonth.problems ?? '—'}
               sub={`vs ${stats?.previousMonth.problems ?? '?'} bulan lalu`}
               change={stats?.probChange} lowerIsBetter={true}
@@ -277,6 +347,47 @@ function MachineDetailDrawer({ id, onClose, onEdit }) {
               sub="Mean Time Between Failures"
               change={null} color="bg-emerald-500"
             />
+            <KpiMini
+              icon={CalendarCheck} label="PM Compliance"
+              value={`${pmComplianceRate}%`}
+              sub={`${pmOnTrack}/${pmTotal} on track`}
+              change={null} color={pmComplianceRate > 90 ? 'bg-emerald-500' : pmComplianceRate >= 70 ? 'bg-amber-500' : 'bg-red-500'}
+            />
+          </div>
+
+          {/* PM Status Section */}
+          <div>
+            <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-3">PM Status</p>
+            {pmSchedules.length === 0 ? (
+              <div className="flex flex-col items-center py-8 text-slate-300 bg-slate-50 rounded-xl border border-slate-100">
+                <CalendarCheck size={24} className="mb-2" />
+                <p className="text-sm">Belum ada jadwal PM untuk mesin ini</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto border border-slate-100 rounded-xl">
+                <table className="w-full min-w-[520px]">
+                  <thead className="bg-slate-50 border-b border-slate-100">
+                    <tr>{['Tipe PM', 'Last Done', 'Next Due', 'Status', ''].map(h => <th key={h} className="table-th text-[10px]">{h}</th>)}</tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {pmSchedules.map(s => (
+                      <tr key={s.id} className="hover:bg-slate-50">
+                        <td className="table-td"><CategoryBadge category={s.pm_type} /></td>
+                        <td className="table-td text-[11px] text-slate-500">{fmtDate(s.last_done_date)}</td>
+                        <td className="table-td text-[11px] text-slate-500">{fmtDate(s.next_due_date)}</td>
+                        <td className="table-td"><PmStatusBadge status={pmStatus(s)} /></td>
+                        <td className="table-td">
+                          <button onClick={() => handleMarkPmDone(s)} disabled={marking === s.id}
+                            className="text-[10px] font-semibold px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-colors disabled:opacity-50">
+                            {marking === s.id ? <Loader2 size={10} className="animate-spin inline" /> : 'Mark PM Done'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
           {/* Charts row */}
@@ -336,47 +447,59 @@ function MachineDetailDrawer({ id, onClose, onEdit }) {
             </div>
           )}
 
-          {/* Problem History */}
+          {/* Activity History — gabungan Planning + Trouble, gantikan Problem History */}
           <div>
             <div className="flex items-center justify-between mb-3">
-              <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
-                Problem History ({machine.total_problems})
-              </p>
+              <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Activity History</p>
               <div className="flex items-center gap-2 text-[11px]">
-                <span className="text-slate-400">{machine.open_problems} aktif</span>
+                <span className="text-slate-400">{machine.open_problems} trouble aktif</span>
                 <span className="text-slate-300">·</span>
                 <span className="text-slate-400">{fmtDur(machine.total_downtime)} total downtime</span>
               </div>
             </div>
 
-            {machine.problems?.length === 0 ? (
+            <div className="flex gap-1 mb-3 border-b border-slate-100">
+              {[{ v: 'all', l: 'All' }, { v: 'Planning', l: 'Planning' }, { v: 'Trouble', l: 'Trouble' }].map(t => (
+                <button key={t.v} onClick={() => setActivityTab(t.v)}
+                  className={`px-3 py-2 text-xs font-semibold border-b-2 -mb-px transition-colors ${
+                    activityTab === t.v ? 'border-navy-900 text-navy-900' : 'border-transparent text-slate-400 hover:text-slate-600'
+                  }`}>
+                  {t.l}
+                </button>
+              ))}
+            </div>
+
+            {activityLoading ? (
+              <div className="space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-10 bg-slate-100 rounded-lg animate-pulse" />)}</div>
+            ) : activityLogs.length === 0 ? (
               <div className="flex flex-col items-center py-10 text-slate-300">
                 <CheckCircle2 size={28} className="mb-2"/>
-                <p className="text-sm">Belum ada problem tercatat</p>
+                <p className="text-sm">Belum ada aktivitas tercatat</p>
               </div>
             ) : (
               <div className="overflow-x-auto border border-slate-100 rounded-xl">
-                <table className="w-full">
+                <table className="w-full min-w-[560px]">
                   <thead className="bg-slate-50 border-b border-slate-100">
                     <tr>
-                      {['Tiket','Kategori','Status','Tanggal','Downtime','Teknisi'].map(h=>(
+                      {['Log#','Tipe','Kategori','Status','Tanggal','Downtime','Teknisi'].map(h=>(
                         <th key={h} className="table-th text-[10px]">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
-                    {machine.problems.map(p=>(
-                      <tr key={p.id} className="hover:bg-slate-50">
+                    {activityLogs.map(l=>(
+                      <tr key={l.id} className="hover:bg-slate-50">
                         <td className="table-td">
                           <span className="font-mono text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
-                            {p.ticket_number}
+                            {l.log_number}
                           </span>
                         </td>
-                        <td className="table-td"><CategoryBadge category={p.problem_category}/></td>
-                        <td className="table-td"><StatusBadge status={p.status}/></td>
-                        <td className="table-td text-[10px] text-slate-400">{fmtDate(p.reported_at)}</td>
-                        <td className="table-td text-xs text-orange-600 font-medium">{fmtDur(p.downtime)}</td>
-                        <td className="table-td text-[11px] text-slate-500">{p.technician||'—'}</td>
+                        <td className="table-td"><LogTypeBadge type={l.log_type}/></td>
+                        <td className="table-td"><CategoryBadge category={l.category}/></td>
+                        <td className="table-td"><StatusBadge status={l.status}/></td>
+                        <td className="table-td text-[10px] text-slate-400">{fmtDate(l.log_date)}</td>
+                        <td className="table-td text-xs text-orange-600 font-medium">{l.log_type === 'Trouble' ? fmtDur(l.downtime_minutes) : '—'}</td>
+                        <td className="table-td text-[11px] text-slate-500">{l.technician||'—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -391,7 +514,7 @@ function MachineDetailDrawer({ id, onClose, onEdit }) {
 }
 
 // ── Machine Card (card view) ──────────────────────────────────────────────
-function MachineCard({ m, onClick, onEdit, onDelete }) {
+function MachineCard({ m, onClick, onEdit, onDelete, canManage }) {
   return (
     <div className="card hover:shadow-card-hover transition-all cursor-pointer group" onClick={onClick}>
       <div className="flex items-start justify-between mb-3">
@@ -437,10 +560,12 @@ function MachineCard({ m, onClick, onEdit, onDelete }) {
       )}
 
       <div className="flex items-center justify-between pt-3 border-t border-slate-100">
-        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-          <button className="p-1.5 hover:bg-amber-50 rounded text-amber-500" onClick={() => onEdit(m)}><Pencil size={13}/></button>
-          <button className="p-1.5 hover:bg-red-50 rounded text-red-400" onClick={() => onDelete(m)}><Trash2 size={13}/></button>
-        </div>
+        {canManage ? (
+          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+            <button className="p-1.5 hover:bg-amber-50 rounded text-amber-500" onClick={() => onEdit(m)}><Pencil size={13}/></button>
+            <button className="p-1.5 hover:bg-red-50 rounded text-red-400" onClick={() => onDelete(m)}><Trash2 size={13}/></button>
+          </div>
+        ) : <span />}
         <span className="flex items-center gap-1 text-[11px] text-blue-600 font-medium">Detail <ChevronRight size={12}/></span>
       </div>
     </div>
@@ -451,6 +576,8 @@ function MachineCard({ m, onClick, onEdit, onDelete }) {
 // MAIN MACHINES PAGE
 // ══════════════════════════════════════════════════════════════════════════
 export default function Machines() {
+  const { user } = useAuth()
+  const canManage = user?.role === 'Admin' || user?.role === 'Supervisor'
   const [machines, setMachines]   = useState([])
   const [meta, setMeta]           = useState({ types: [], locations: [], depts: [] })
   const [loading, setLoading]     = useState(true)
@@ -555,9 +682,11 @@ export default function Machines() {
               <Table2 size={15}/>
             </button>
           </div>
-          <button className="btn-primary" onClick={() => { setEditItem(null); setShowForm(true) }}>
-            <Plus size={15}/> Tambah Mesin
-          </button>
+          {canManage && (
+            <button className="btn-primary" onClick={() => { setEditItem(null); setShowForm(true) }}>
+              <Plus size={15}/> Tambah Mesin
+            </button>
+          )}
         </div>
       </div>
 
@@ -613,6 +742,7 @@ export default function Machines() {
                 onClick={() => setDrawerID(m.id)}
                 onEdit={openEdit}
                 onDelete={handleDelete}
+                canManage={canManage}
               />
             ))}
           </div>
@@ -658,10 +788,12 @@ export default function Machines() {
                     </td>
                     <td className="table-td text-xs text-orange-600 font-medium">{fmtDur(m.total_downtime)}</td>
                     <td className="table-td" onClick={e=>e.stopPropagation()}>
-                      <div className="flex gap-1">
-                        <button className="p-1.5 hover:bg-amber-50 rounded text-amber-500" onClick={()=>openEdit(m)}><Pencil size={13}/></button>
-                        <button className="p-1.5 hover:bg-red-50 rounded text-red-400" onClick={()=>handleDelete(m)}><Trash2 size={13}/></button>
-                      </div>
+                      {canManage && (
+                        <div className="flex gap-1">
+                          <button className="p-1.5 hover:bg-amber-50 rounded text-amber-500" onClick={()=>openEdit(m)}><Pencil size={13}/></button>
+                          <button className="p-1.5 hover:bg-red-50 rounded text-red-400" onClick={()=>handleDelete(m)}><Trash2 size={13}/></button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -680,6 +812,7 @@ export default function Machines() {
           id={drawerID}
           onClose={() => setDrawerID(null)}
           onEdit={(m) => { setDrawerID(null); openEdit(m) }}
+          showToast={showToast}
         />
       )}
       {toast && <Toast msg={toast.msg} type={toast.type} onDone={() => setToast(null)}/>}
