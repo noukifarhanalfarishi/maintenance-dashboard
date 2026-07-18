@@ -25,6 +25,21 @@ const MACHINES = [
   { code: 'UT-01', name: 'Air Compressor Utility 1', type: 'Compressor', dept: 'Utility Dept',         line: null, hot: true  },
 ];
 
+// PD2 BELT terbagi menjadi 2 departemen: Element Ring (di atas, RF-01..08)
+// dan Belt Assy (di bawah). Mesin-mesin ini ditambahkan lewat migrasi
+// idempotent (lihat seedBeltAssyMachines) supaya database yang sudah berisi
+// data tetap mendapat mesin Belt Assy tanpa menghapus/mengubah data lain.
+const BELT_ASSY_MACHINES = [
+  { code: 'BA-01', name: 'Conveyor Belt Line 1',     type: 'Conveyor',         dept: 'Belt Assy Dept', line: 'D', hot: false },
+  { code: 'BA-02', name: 'Conveyor Belt Line 2',     type: 'Conveyor',         dept: 'Belt Assy Dept', line: 'D', hot: true  },
+  { code: 'BA-03', name: 'Belt Assembly Robot 1',    type: 'Robot',            dept: 'Belt Assy Dept', line: 'D', hot: true  },
+  { code: 'BA-04', name: 'Belt Assembly Robot 2',    type: 'Robot',            dept: 'Belt Assy Dept', line: 'D', hot: false },
+  { code: 'BA-05', name: 'Hydraulic Press 1',        type: 'Hydraulic Press',  dept: 'Belt Assy Dept', line: 'E', hot: true  },
+  { code: 'BA-06', name: 'Washing Machine 1',        type: 'Washing Machine',  dept: 'Belt Assy Dept', line: 'E', hot: false },
+  { code: 'BA-07', name: 'Cooling Tower 1',          type: 'Cooling Tower',    dept: 'Belt Assy Dept', line: 'E', hot: false },
+  { code: 'BA-08', name: 'Belt Assembly Machine 1',  type: 'Assembly Machine', dept: 'Belt Assy Dept', line: 'E', hot: false },
+];
+
 const SPARE_PARTS = [
   { code: 'SP-001', name: 'Spindle Tape',              category: 'Mechanical', stock: 150, min: 50, unit: 'pcs',  location: 'Gudang Sparepart A' },
   { code: 'SP-002', name: 'Ring Traveler',              category: 'Mechanical', stock: 500, min: 100, unit: 'pcs', location: 'Gudang Sparepart A' },
@@ -245,12 +260,13 @@ function genLogDescription(machine, logType, category) {
   return `${machine.machine_name} mengalami trouble ${category.toLowerCase()}.`;
 }
 
-function seedDailyLogs(db) {
-  const { count } = db.prepare('SELECT COUNT(*) count FROM daily_logs').get();
-  if (count > 0) return;
-
-  const machines = db.prepare('SELECT id, machine_code, machine_name FROM machines').all();
-  const machineWeights = machines.map(m => [m, MACHINES.find(x => x.code === m.machine_code)?.hot ? 3 : 1]);
+// ── Generate ~totalDays histori daily_logs untuk sekumpulan mesin. Dipakai
+// baik oleh seed awal (semua mesin, tabel kosong) maupun top-up Belt Assy
+// (mesin baru saja, tabel sudah berisi data mesin lain). Nomor log dihitung
+// dinamis dari MAX log_number per tanggal supaya tidak bentrok dengan log
+// yang sudah ada di tanggal yang sama (constraint UNIQUE pada log_number).
+function generateLogsForMachines(db, machines, totalDays) {
+  const machineWeights = machines.map(m => [m, m.hot ? 3 : 1]);
 
   const insert = db.prepare(`
     INSERT INTO daily_logs
@@ -259,22 +275,26 @@ function seedDailyLogs(db) {
        spare_parts_used, notes, reported_by, created_at, updated_at)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `);
+  const lastLogNumFor = db.prepare("SELECT log_number FROM daily_logs WHERE log_number LIKE ? ORDER BY log_number DESC LIMIT 1");
 
   const shiftStartHour = { 1: 6, 2: 14, 3: 22 };
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const TOTAL_DAYS = 92; // ~3 bulan terakhir
 
   const tx = db.transaction(() => {
-    for (let dayOffset = TOTAL_DAYS; dayOffset >= 0; dayOffset--) {
+    for (let dayOffset = totalDays; dayOffset >= 0; dayOffset--) {
       const day = new Date(today);
       day.setDate(day.getDate() - dayOffset);
       const dateStr = fmtDate(day);
       const isRecent = dayOffset <= 14;
+      const ds = dateStr.replace(/-/g, '');
+
+      const lastLog = lastLogNumFor.get(`LOG-${ds}-%`);
+      let seq = lastLog ? parseInt(lastLog.log_number.split('-')[2]) + 1 : 1;
 
       const numLogsToday = randInt(1, 3);
-      for (let seq = 1; seq <= numLogsToday; seq++) {
-        const logNumber = `LOG-${dateStr.replace(/-/g, '')}-${String(seq).padStart(3, '0')}`;
+      for (let i = 0; i < numLogsToday; i++, seq++) {
+        const logNumber = `LOG-${ds}-${String(seq).padStart(3, '0')}`;
         const logType = Math.random() < 0.6 ? 'Planning' : 'Trouble';
         const shift = weightedPick([[1, 50], [2, 30], [3, 20]]);
         const machine = weightedPick(machineWeights);
@@ -349,12 +369,92 @@ function seedDailyLogs(db) {
   tx();
 }
 
+function seedDailyLogs(db) {
+  const { count } = db.prepare('SELECT COUNT(*) count FROM daily_logs').get();
+  if (count > 0) return;
+
+  const machines = db.prepare('SELECT id, machine_code, machine_name FROM machines').all()
+    .map(m => ({ ...m, hot: MACHINES.find(x => x.code === m.machine_code)?.hot || false }));
+  generateLogsForMachines(db, machines, 92);
+}
+
+// ── Migrasi idempotent: tambah mesin Belt Assy + jadwal PM + histori log,
+// tanpa menyentuh data yang sudah ada (aman dijalankan di database yang
+// sudah berisi data maupun database baru).
+function seedBeltAssyMachines(db) {
+  const insert = db.prepare(`
+    INSERT INTO machines (machine_code, machine_name, machine_type, location, department, status, line, pm_daily, pm_weekly, pm_monthly)
+    VALUES (?, ?, ?, ?, ?, 'active', ?, 1, 1, 1)
+  `);
+  const exists = db.prepare('SELECT 1 FROM machines WHERE machine_code = ?');
+  const tx = db.transaction(() => {
+    BELT_ASSY_MACHINES.forEach(m => {
+      if (exists.get(m.code)) return;
+      insert.run(m.code, m.name, m.type, `Line ${m.line}`, m.dept, m.line);
+    });
+  });
+  tx();
+}
+
+function seedBeltAssyPmSchedules(db) {
+  const codes = BELT_ASSY_MACHINES.map(m => m.code);
+  const machines = db.prepare(`SELECT id FROM machines WHERE machine_code IN (${codes.map(() => '?').join(',')})`).all(...codes);
+  if (machines.length === 0) return;
+
+  const hasSchedule = db.prepare('SELECT COUNT(*) c FROM pm_schedules WHERE machine_id = ?');
+  const insert = db.prepare(`
+    INSERT INTO pm_schedules (machine_id, pm_type, description, interval_days, last_done_date, next_due_date, assigned_to, is_active)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+  `);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  function addSchedule(machineId, pmType, intervalDays, description) {
+    const lastDone = new Date(today);
+    lastDone.setDate(lastDone.getDate() - randInt(0, intervalDays));
+    const nextDue = new Date(lastDone);
+    nextDue.setDate(nextDue.getDate() + intervalDays);
+    insert.run(machineId, pmType, description, intervalDays, fmtDate(lastDone), fmtDate(nextDue), pickRandom(TECHNICIANS));
+  }
+
+  const tx = db.transaction(() => {
+    machines.forEach((m, idx) => {
+      if (hasSchedule.get(m.id).c > 0) return; // sudah ada jadwal utk mesin ini
+      addSchedule(m.id, 'Daily Check',  1,  'Pengecekan harian kondisi mesin sesuai checklist standar.');
+      addSchedule(m.id, 'Weekly PM',    7,  'Pemeriksaan mingguan, pelumasan, dan pengencangan baut.');
+      addSchedule(m.id, 'Monthly PM',   30, 'Pemeriksaan bulanan menyeluruh dan penggantian consumable.');
+      if (idx % 2 === 0) addSchedule(m.id, '3-Monthly PM', 90, 'Overhaul ringan tiap 3 bulan (bearing, belt, kalibrasi).');
+    });
+  });
+  tx();
+}
+
+function seedBeltAssyLogs(db) {
+  const codes = BELT_ASSY_MACHINES.map(m => m.code);
+  const machines = db.prepare(`SELECT id, machine_code, machine_name FROM machines WHERE machine_code IN (${codes.map(() => '?').join(',')})`)
+    .all(...codes)
+    .map(m => ({ ...m, hot: BELT_ASSY_MACHINES.find(x => x.code === m.machine_code)?.hot || false }));
+  if (machines.length === 0) return;
+
+  const ids = machines.map(m => m.id);
+  const { count } = db.prepare(`SELECT COUNT(*) count FROM daily_logs WHERE machine_id IN (${ids.map(() => '?').join(',')})`).get(...ids);
+  if (count > 0) return; // sudah ada histori utk mesin2 Belt Assy ini
+
+  generateLogsForMachines(db, machines, 92);
+}
+
 function seedAll(db) {
   seedMachines(db);
   seedSpareParts(db);
   seedShifts(db);
   seedPmSchedules(db);
   seedDailyLogs(db);
+
+  // Migrasi idempotent — aman dijalankan berkali-kali, hanya menambah data
+  // Belt Assy yang belum ada.
+  seedBeltAssyMachines(db);
+  seedBeltAssyPmSchedules(db);
+  seedBeltAssyLogs(db);
 }
 
 module.exports = seedAll;

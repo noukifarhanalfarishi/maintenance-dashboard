@@ -26,12 +26,12 @@ export const authApi = {
 
 export const dashboardApi = {
   getSummaryV2:      (p) => api.get('/dashboard/summary-v2',      { params: p }),
-  getWeeklyTrend:    ()  => api.get('/dashboard/weekly-trend'),
+  getWeeklyTrend:    (p) => api.get('/dashboard/weekly-trend',    { params: p }),
   getByCategory:     (p) => api.get('/dashboard/by-category',     { params: p }),
   getTopDowntime:    (p) => api.get('/dashboard/top-downtime',    { params: p }),
   getLowStock:       ()  => api.get('/dashboard/low-stock'),
   getRecentActivity: (p) => api.get('/dashboard/recent-activity', { params: p }),
-  getPmSummary:      ()  => api.get('/dashboard/pm-summary'),
+  getPmSummary:      (p) => api.get('/dashboard/pm-summary',      { params: p }),
 }
 
 export const machinesApi = {

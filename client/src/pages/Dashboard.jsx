@@ -97,6 +97,29 @@ function PeriodFilter({ period, onChange, cStart, cEnd, onCStart, onCEnd }) {
   )
 }
 
+// ── Department Tabs — PD2 BELT terbagi 2 departemen: Element Ring & Belt Assy ─
+const DEPT_OPTS = [
+  { value: 'element-ring', label: 'Element Ring',      sub: 'Departemen Element Ring' },
+  { value: 'belt-assy',    label: 'Belt Assy',          sub: 'Departemen Belt Assy' },
+  { value: 'all',          label: 'Semua (PD2 BELT)',   sub: 'Element Ring + Belt Assy' },
+]
+
+function DeptTabs({ dept, onChange }) {
+  return (
+    <div className="grid grid-cols-3 gap-3">
+      {DEPT_OPTS.map(o => (
+        <button key={o.value} onClick={() => onChange(o.value)}
+          className={`text-left px-4 py-3 rounded-2xl border-2 transition-all ${
+            dept === o.value ? 'border-navy-900 bg-navy-900 shadow-lg shadow-navy-900/20' : 'border-slate-200 bg-white hover:border-slate-300'
+          }`}>
+          <p className={`text-sm font-bold ${dept === o.value ? 'text-white' : 'text-slate-700'}`}>{o.label}</p>
+          <p className={`text-[11px] mt-0.5 ${dept === o.value ? 'text-white/60' : 'text-slate-400'}`}>{o.sub}</p>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 // ── Progress ring (PM Completion Rate) ──────────────────────────────────────
 function ProgressRing({ pct, size = 60, stroke = 6, color }) {
   const r = (size - stroke) / 2
@@ -126,6 +149,7 @@ function Skeleton({ h = 'h-32', className = '' }) {
 // ══════════════════════════════════════════════════════════════════════════════
 export default function Dashboard() {
   const navigate = useNavigate()
+  const [dept, setDept] = useState('all') // 'element-ring' | 'belt-assy' | 'all' (PD2 BELT total)
   const [period, setPeriod] = useState('30d')
   const [cStart, setCStart] = useState('')
   const [cEnd,   setCEnd]   = useState('')
@@ -144,18 +168,18 @@ export default function Dashboard() {
     if (!start || !end) return
     setLoading(true)
     Promise.all([
-      dashboardApi.getSummaryV2({ start, end }),
-      dashboardApi.getWeeklyTrend(),
-      dashboardApi.getByCategory({ start, end }),
-      dashboardApi.getTopDowntime({ start, end }),
-      dashboardApi.getRecentActivity({ limit: 10 }),
-      dashboardApi.getPmSummary(),
+      dashboardApi.getSummaryV2({ start, end, dept }),
+      dashboardApi.getWeeklyTrend({ dept }),
+      dashboardApi.getByCategory({ start, end, dept }),
+      dashboardApi.getTopDowntime({ start, end, dept }),
+      dashboardApi.getRecentActivity({ limit: 10, dept }),
+      dashboardApi.getPmSummary({ dept }),
     ]).then(([k, w, cat, td, rec, pm]) => {
       setKpi(k.data); setWeekly(w.data); setByCategory(cat.data)
       setTopDT(td.data); setRecent(rec.data); setPmSummary(pm.data)
       setLoading(false)
     }).catch(() => setLoading(false))
-  }, [start, end])
+  }, [start, end, dept])
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
@@ -185,6 +209,9 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-5">
+
+      {/* ── Department Tabs ──────────────────────────────────────────────── */}
+      <DeptTabs dept={dept} onChange={setDept} />
 
       {/* ── Page Title + Period Filter ─────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
