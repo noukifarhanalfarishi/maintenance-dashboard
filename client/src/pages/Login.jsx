@@ -4,13 +4,6 @@ import { Eye, EyeOff, Activity, Loader2, AlertCircle, Wrench, BarChart3, Shield,
 import { useAuth } from '../contexts/AuthContext'
 import api from '../api/client'
 
-const DEMO_ACCOUNTS = [
-  { role: 'Admin',      username: 'admin',      password: 'admin123',  color: 'bg-red-100 text-red-700' },
-  { role: 'Supervisor', username: 'supervisor', password: 'super123',  color: 'bg-purple-100 text-purple-700' },
-  { role: 'Technician', username: 'teknisi1',   password: 'teknis123', color: 'bg-blue-100 text-blue-700' },
-  { role: 'Operator',   username: 'operator1',  password: 'oper123',   color: 'bg-green-100 text-green-700' },
-]
-
 export default function Login() {
   const navigate = useNavigate()
   const { login } = useAuth()
@@ -33,11 +26,6 @@ export default function Login() {
     } catch (err) {
       setError(err.response?.data?.error || 'Login gagal. Coba lagi.')
     } finally { setLoading(false) }
-  }
-
-  const fillDemo = (account) => {
-    setForm({ username: account.username, password: account.password })
-    setError('')
   }
 
   return (
@@ -170,29 +158,6 @@ export default function Login() {
               {loading ? 'Masuk...' : 'Masuk'}
             </button>
           </form>
-
-          {/* Demo accounts */}
-          <div className="border border-slate-200 rounded-xl overflow-hidden">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-4 py-2.5 bg-slate-50 border-b border-slate-200">
-              Akun Demo
-            </p>
-            <div className="divide-y divide-slate-100">
-              {DEMO_ACCOUNTS.map(acc => (
-                <button
-                  key={acc.username}
-                  type="button"
-                  onClick={() => fillDemo(acc)}
-                  className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-slate-50 transition-colors text-left"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${acc.color}`}>{acc.role}</span>
-                    <span className="text-xs font-mono text-slate-700">{acc.username}</span>
-                  </div>
-                  <span className="text-[10px] text-slate-400 font-mono">{acc.password}</span>
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
     </div>
