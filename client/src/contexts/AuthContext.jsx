@@ -23,10 +23,19 @@ export function AuthProvider({ children }) {
   const [token,   setToken]   = useState(null)
   const [loading, setLoading] = useState(true)
 
-  // Restore session on mount
+  // Session dipertahankan lewat sessionStorage (bukan localStorage) supaya
+  // otomatis hilang saat tab/browser ditutup — user wajib login ulang tiap
+  // kali membuka web dari awal, tapi F5/refresh biasa tidak logout karena
+  // sessionStorage bertahan selama tab masih hidup.
   useEffect(() => {
-    const storedToken = localStorage.getItem('maint_token')
-    const storedUser  = localStorage.getItem('maint_user')
+    // Bersihkan token lama yang mungkin masih tersisa di localStorage dari
+    // versi sebelum perubahan ini (supaya tidak ada JWT plaintext yang
+    // tertinggal permanen di browser).
+    localStorage.removeItem('maint_token')
+    localStorage.removeItem('maint_user')
+
+    const storedToken = sessionStorage.getItem('maint_token')
+    const storedUser  = sessionStorage.getItem('maint_user')
     if (storedToken && storedUser) {
       try {
         const u = JSON.parse(storedUser)
@@ -41,16 +50,16 @@ export function AuthProvider({ children }) {
   const login = useCallback((token, userData) => {
     setToken(token)
     setUser(userData)
-    localStorage.setItem('maint_token', token)
-    localStorage.setItem('maint_user', JSON.stringify(userData))
+    sessionStorage.setItem('maint_token', token)
+    sessionStorage.setItem('maint_user', JSON.stringify(userData))
     api.defaults.headers.common['Authorization'] = `Bearer ${token}`
   }, [])
 
   const logout = useCallback(() => {
     setToken(null)
     setUser(null)
-    localStorage.removeItem('maint_token')
-    localStorage.removeItem('maint_user')
+    sessionStorage.removeItem('maint_token')
+    sessionStorage.removeItem('maint_user')
     delete api.defaults.headers.common['Authorization']
   }, [])
 

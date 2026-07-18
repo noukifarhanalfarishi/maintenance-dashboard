@@ -7,8 +7,8 @@ api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401 && window.location.pathname !== '/login') {
-      localStorage.removeItem('maint_token')
-      localStorage.removeItem('maint_user')
+      sessionStorage.removeItem('maint_token')
+      sessionStorage.removeItem('maint_user')
       window.location.replace('/login')
     }
     return Promise.reject(err)
