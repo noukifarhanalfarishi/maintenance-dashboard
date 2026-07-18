@@ -32,10 +32,15 @@ app.use('/api/users',        require('./routes/users'));
 app.use('/api/dashboard',    require('./routes/dashboard'));
 app.use('/api/reports',      require('./routes/reports'));
 // NOTE: routes/problems.js dan routes/repairs.js sudah tidak dipakai — konsep
-// "Problem Tracking" digantikan oleh Daily Maintenance Activity Log
-// (daily_logs). File-nya sengaja tidak dihapus, hanya tidak lagi di-mount di
-// sini karena tabel problems/repairs sudah didrop dari database.
+// "Problem Tracking" digantikan oleh Daily Maintenance Activity Log.
+
+// ── Serve Frontend (production) ─────────────────────────────────────────────
+const path = require('path');
+app.use(express.static(path.join(__dirname, '..', 'client', 'dist')));
+app.get('*', (_req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'client', 'dist', 'index.html'));
+});
 
 app.listen(PORT, () => {
-  console.log(`✅ Server berjalan di http://localhost:${PORT}`);
+  console.log(`Server berjalan di http://localhost:${PORT}`);
 });
