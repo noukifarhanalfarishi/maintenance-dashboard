@@ -172,6 +172,38 @@ router.get('/top-downtime', (req, res) => {
 });
 
 // ──────────────────────────────────────────────
+// Trend downtime tahunan — 12 bulan penuh (Jan–Des) tahun berjalan, dipakai
+// area/line chart "Trend Downtime Tahunan" di Dashboard. Bulan tanpa data
+// trouble tetap muncul dengan downtime_minutes=0 (bukan di-skip) supaya
+// progres sepanjang tahun terlihat.
+// ──────────────────────────────────────────────
+const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+
+router.get('/yearly-downtime', (req, res) => {
+  try {
+    const year = req.query.year ? parseInt(req.query.year, 10) : new Date().getFullYear();
+    const dc = deptClause(req.query.dept);
+
+    const rows = db.prepare(`
+      SELECT CAST(strftime('%m', d.log_date) AS INTEGER) AS month_num,
+             COALESCE(SUM(d.downtime_minutes), 0)         AS downtime_minutes
+      FROM daily_logs d JOIN machines m ON d.machine_id = m.id
+      WHERE d.log_type='Trouble' AND ${dc} AND strftime('%Y', d.log_date) = ?
+      GROUP BY month_num
+    `).all(String(year));
+
+    const byMonth = new Map(rows.map(r => [r.month_num, r.downtime_minutes]));
+    const data = MONTH_LABELS.map((label, i) => ({
+      month: label,
+      month_num: i + 1,
+      downtime_minutes: byMonth.get(i + 1) || 0,
+    }));
+
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ──────────────────────────────────────────────
 // Low stock spare parts (dipakai badge notifikasi di Header) — tidak
 // tersegmentasi per departemen karena spare part dipakai lintas mesin/dept.
 // ──────────────────────────────────────────────

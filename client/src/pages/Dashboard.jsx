@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  BarChart, Bar, PieChart, Pie, LineChart, Line,
+  BarChart, Bar, PieChart, Pie, LineChart, Line, AreaChart, Area,
   Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList,
 } from 'recharts'
 import {
@@ -161,6 +161,7 @@ export default function Dashboard() {
   const [topDT,     setTopDT]     = useState([])
   const [recent,    setRecent]    = useState([])
   const [pmSummary, setPmSummary] = useState([])
+  const [yearlyDT,  setYearlyDT]  = useState([])
 
   const { start, end } = useMemo(() => getPeriodDates(period, cStart, cEnd), [period, cStart, cEnd])
 
@@ -174,9 +175,11 @@ export default function Dashboard() {
       dashboardApi.getTopDowntime({ start, end, dept }),
       dashboardApi.getRecentActivity({ limit: 10, dept }),
       dashboardApi.getPmSummary({ dept }),
-    ]).then(([k, w, cat, td, rec, pm]) => {
+      dashboardApi.getYearlyDowntime({ dept }),
+    ]).then(([k, w, cat, td, rec, pm, yr]) => {
       setKpi(k.data); setWeekly(w.data); setByCategory(cat.data)
       setTopDT(td.data); setRecent(rec.data); setPmSummary(pm.data)
+      setYearlyDT(yr.data)
       setLoading(false)
     }).catch(() => setLoading(false))
   }, [start, end, dept])
@@ -189,6 +192,7 @@ export default function Dashboard() {
     return () => clearInterval(t)
   }, [fetchAll])
 
+  const currentYear = useMemo(() => new Date().getFullYear(), [])
   const totalCat = byCategory.reduce((s, d) => s + d.value, 0)
   const pmRingColor = !kpi ? '#94a3b8' : kpi.pmCompletion.rate > 90 ? '#10b981' : kpi.pmCompletion.rate >= 70 ? '#f59e0b' : '#ef4444'
 
@@ -423,6 +427,34 @@ export default function Dashboard() {
             </ResponsiveContainer>
           )}
         </div>
+      </div>
+
+      {/* ── ROW 3.5: Trend Downtime Tahunan — full width, 12 bulan penuh ────── */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-1">
+          <p className="card-title !mb-0">Trend Downtime Tahunan {currentYear}</p>
+          <span className="text-[10px] text-slate-400 bg-slate-50 border border-slate-100 px-2 py-1 rounded-lg">Jan – Des {currentYear}</span>
+        </div>
+        <p className="text-[11px] text-slate-400 mb-4">Total downtime trouble (menit) per bulan sepanjang tahun berjalan</p>
+
+        {loading ? <Skeleton h="h-56" /> : (
+          <ResponsiveContainer width="100%" height={240}>
+            <AreaChart data={yearlyDT} margin={{ left: -8, right: 12, top: 4, bottom: 0 }}>
+              <defs>
+                <linearGradient id="yearlyDowntimeGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={ACCENT} stopOpacity={0.35} />
+                  <stop offset="95%" stopColor={ACCENT} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+              <XAxis dataKey="month" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} allowDecimals={false} tickFormatter={v => v.toLocaleString('id-ID')} />
+              <Tooltip content={<ChartTip />} />
+              <Area type="monotone" dataKey="downtime_minutes" name="Downtime" unit=" menit" stroke={ACCENT} strokeWidth={2.5}
+                fill="url(#yearlyDowntimeGradient)" dot={{ r: 3, fill: ACCENT, stroke: '#fff', strokeWidth: 1.5 }} activeDot={{ r: 5 }} />
+            </AreaChart>
+          </ResponsiveContainer>
+        )}
       </div>
 
       {/* ── ROW 4: PM Compliance Summary + Recent Activity ──────────────────── */}

@@ -32,6 +32,7 @@ export const dashboardApi = {
   getLowStock:       ()  => api.get('/dashboard/low-stock'),
   getRecentActivity: (p) => api.get('/dashboard/recent-activity', { params: p }),
   getPmSummary:      (p) => api.get('/dashboard/pm-summary',      { params: p }),
+  getYearlyDowntime: (p) => api.get('/dashboard/yearly-downtime', { params: p }),
 }
 
 export const machinesApi = {
