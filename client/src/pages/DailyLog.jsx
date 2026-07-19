@@ -306,7 +306,7 @@ function LogFormModal({ logType, editingLog, machines, spareParts, defaultShift,
               <select className={`input ${errors.machine_id ? 'border-red-400' : ''}`}
                 value={form.machine_id} onChange={e => set('machine_id', e.target.value)}>
                 <option value="">— Pilih —</option>
-                {machines.map(m => <option key={m.id} value={m.id}>{m.machine_code}</option>)}
+                {machines.map(m => <option key={m.id} value={m.id}>{m.machine_name ? `${m.machine_code} — ${m.machine_name}` : m.machine_code}</option>)}
               </select>
             </div>
           </div>
@@ -883,7 +883,7 @@ export default function DailyLog() {
         </select>
         <select className="input w-48 text-sm" value={filters.machine_id} onChange={e => setF('machine_id', e.target.value)}>
           <option value="">Semua Mesin</option>
-          {machines.map(m => <option key={m.id} value={m.id}>{m.machine_code} — {m.machine_name}</option>)}
+          {machines.map(m => <option key={m.id} value={m.id}>{m.machine_name ? `${m.machine_code} — ${m.machine_name}` : m.machine_code}</option>)}
         </select>
         <select className="input w-40 text-sm" value={filters.status} onChange={e => setF('status', e.target.value)}>
           <option value="">Semua Status</option>

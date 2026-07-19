@@ -701,7 +701,7 @@ export default function Reports() {
               <p className="label">Pilih Mesin *</p>
               <select className="input" value={machineId} onChange={e=>{ setMachineId(e.target.value); setReportData(null) }}>
                 <option value="">— Pilih Mesin —</option>
-                {machines.map(m=><option key={m.id} value={m.id}>{m.machine_code} — {m.machine_name}</option>)}
+                {machines.map(m=><option key={m.id} value={m.id}>{m.machine_name ? `${m.machine_code} — ${m.machine_name}` : m.machine_code}</option>)}
               </select>
             </div>
             <div>

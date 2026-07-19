@@ -128,7 +128,7 @@ function PMFormModal({ schedule, machines, onSave, onClose }) {
             <select className={`input ${errors.machine_id ? 'border-red-400' : ''}`}
               value={form.machine_id} onChange={e => set('machine_id', e.target.value)}>
               <option value="">— Pilih —</option>
-              {machines.map(m => <option key={m.id} value={m.id}>{m.machine_code} — {m.machine_name}</option>)}
+              {machines.map(m => <option key={m.id} value={m.id}>{m.machine_name ? `${m.machine_code} — ${m.machine_name}` : m.machine_code}</option>)}
             </select>
             {errors.machine_id && <p className="text-red-500 text-xs mt-1">{errors.machine_id}</p>}
           </div>
@@ -564,7 +564,7 @@ export default function PMSchedule() {
       <div className="card !p-3 flex flex-wrap gap-2 items-center">
         <select className="input w-56 text-sm" value={filters.machine_id} onChange={e => setF('machine_id', e.target.value)}>
           <option value="">Semua Mesin</option>
-          {machines.map(m => <option key={m.id} value={m.id}>{m.machine_code} — {m.machine_name}</option>)}
+          {machines.map(m => <option key={m.id} value={m.id}>{m.machine_name ? `${m.machine_code} — ${m.machine_name}` : m.machine_code}</option>)}
         </select>
         <select className="input w-44 text-sm" value={filters.pm_type} onChange={e => setF('pm_type', e.target.value)}>
           <option value="">Semua Tipe PM</option>
